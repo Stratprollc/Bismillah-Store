@@ -1,0 +1,107 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "A product available in the shop",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "price": { "type": "number" },
+        "cost": { "type": "number" },
+        "stock": { "type": "number" },
+        "unit": { "type": "string" },
+        "barcode": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "price", "stock"]
+    },
+    "Sale": {
+      "title": "Sale",
+      "description": "A sales transaction",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customerId": { "type": "string" },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "productId": { "type": "string" },
+              "productName": { "type": "string" },
+              "quantity": { "type": "number" },
+              "price": { "type": "number" }
+            }
+          }
+        },
+        "totalAmount": { "type": "number" },
+        "discount": { "type": "number" },
+        "finalAmount": { "type": "number" },
+        "paymentMethod": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "sellerId": { "type": "string" }
+      },
+      "required": ["items", "totalAmount", "finalAmount", "timestamp"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "A shop customer",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "points": { "type": "number" },
+        "totalSpent": { "type": "number" }
+      },
+      "required": ["name"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Product category",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "User": {
+      "title": "User",
+      "description": "System user/staff",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "staff"] }
+      },
+      "required": ["uid", "email", "role"]
+    }
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Collection of products"
+    },
+    "/sales/{saleId}": {
+      "schema": "Sale",
+      "description": "Collection of sales transactions"
+    },
+    "/customers/{customerId}": {
+      "schema": "Customer",
+      "description": "Collection of customers"
+    },
+    "/categories/{categoryId}": {
+      "schema": "Category",
+      "description": "Collection of product categories"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Collection of system users"
+    }
+  }
+}

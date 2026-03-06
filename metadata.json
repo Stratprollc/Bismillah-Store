@@ -1,0 +1,5 @@
+{
+  "name": "ShopMaster - Super Shop Management System",
+  "description": "A comprehensive management system for retail shops, featuring inventory tracking, POS, sales reporting, and customer management.",
+  "requestFramePermissions": ["camera"]
+}
