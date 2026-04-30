@@ -10,7 +10,6 @@ const app = initializeApp(firebaseConfig);
 // where standard streams/sockets might be blocked or unstable.
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
-  useFetchStreams: false,
 }, firebaseConfig.firestoreDatabaseId);
 
 export const auth = getAuth(app);

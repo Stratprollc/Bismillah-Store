@@ -1,4 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useVoiceSearch } from './hooks/useVoiceSearch';
+import { standardizeBn, toPhonetic, parseVoiceCommandQuantity, isPhoneticMatch } from './utils/voiceUtils';
 import { 
   LayoutDashboard, 
   Package, 
@@ -41,7 +43,12 @@ import {
   Calculator as CalculatorIcon,
   Image as ImageIcon,
   Camera,
-  Banknote
+  Banknote,
+  RefreshCw,
+  RotateCcw,
+  Sparkles,
+  Mic,
+  MicOff
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -116,7 +123,121 @@ interface ShopSettings {
   receiptFooter?: string;
   waTemplateEnglish?: string;
   waTemplateBengali?: string;
+  printLanguage: 'en' | 'bn';
 }
+
+const PRINT_TRANSLATIONS = {
+  en: {
+    invoice: 'INVOICE',
+    dailyReport: 'DAILY CLOSING REPORT',
+    date: 'Date',
+    time: 'Time',
+    customer: 'Customer',
+    phone: 'Phone',
+    item: 'Item',
+    qty: 'Qty',
+    price: 'Price',
+    amount: 'Amount',
+    total: 'Total',
+    subtotal: 'Subtotal',
+    discount: 'Discount',
+    grandTotal: 'Grand Total',
+    paid: 'Paid',
+    due: 'Due',
+    footer: 'Thank you for your business!',
+    invoiceId: 'Invoice ID',
+    address: 'Address',
+    collectedBy: 'Collected By',
+    closingSummary: 'Closing Summary',
+    cashInHand: 'Cash in Hand',
+    bkash: 'bKash Balance',
+    nagad: 'Nagad',
+    bank: 'Bank',
+    expenses: 'Expenses',
+    totalSales: 'Total Sales',
+    cashReceived: 'Cash Received',
+    status: 'Status',
+    closed: 'CLOSED',
+    itemsCount: 'Items',
+    retailSale: 'Retail Sale',
+    cashSales: 'Cash Sales',
+    dueSales: 'Due Sales',
+    collection: 'Collection',
+    totalCashReceived: 'Total Cash Received',
+    expectedCash: 'Expected Cash',
+    actualCash: 'Actual Cash (Cash in Hand)',
+    discrepancyMatch: 'Everything is correct',
+    discrepancyPlus: 'Extra',
+    discrepancyMinus: 'Discrepancy',
+    noteDetails: 'Denominations',
+    noNotes: 'No data available',
+    digitalBalance: 'Digital Balance',
+    additionalNotes: 'Additional Notes',
+    printedAt: 'Printed At',
+    balanceSummary: 'Balance Summary',
+    prevBalance: 'Prev. Balance',
+    todayBill: 'Today Bill',
+    totalPayable: 'Total Payable',
+    todayPaid: 'Today Paid',
+    currentBalance: 'Current Due',
+    mobile: 'Mobile'
+  },
+  bn: {
+    invoice: 'ইনভয়েস',
+    dailyReport: 'দৈনিক ক্লোজিং রিপোর্ট',
+    date: 'তারিখ',
+    time: 'সময়',
+    customer: 'ক্রেতা',
+    phone: 'ফোন',
+    item: 'আইটেম',
+    qty: 'পরিমাণ',
+    price: 'দর',
+    amount: 'মোট',
+    total: 'মোট',
+    subtotal: 'সাবটোটাল',
+    discount: 'ডিসকাউন্ট',
+    grandTotal: 'সর্বমোট বিল',
+    paid: 'আজকের জমা',
+    due: 'বাকি পরিমাণ',
+    footer: 'Thank you for shopping with us!',
+    invoiceId: 'আইডি',
+    address: 'ঠিকানা',
+    collectedBy: 'সংগ্রহকারী',
+    closingSummary: 'ক্লোজিং সারাংশ',
+    cashInHand: 'ক্যাশ ইন হ্যান্ড',
+    bkash: 'বিকাশ/অনলাইন ব্যালেন্স',
+    nagad: 'নগদ ক্যাশ (Nagad)',
+    bank: 'ব্যাংক',
+    expenses: 'খরচ',
+    totalSales: 'মোট পণ্য বিক্রয়',
+    cashReceived: 'নগদ গ্রহণ',
+    status: 'অবস্থা',
+    closed: 'বন্ধ',
+    itemsCount: 'আইটেম সংখ্যা',
+    retailSale: 'Walk-in Customer',
+    cashSales: 'নগদ বিক্রয়',
+    dueSales: 'বাকি বিক্রয়',
+    collection: 'বাকি আদায় (Collection)',
+    totalCashReceived: 'মোট নগদ প্রাপ্তি',
+    expectedCash: 'হিসাব অনুযায়ী নগদ (Expected)',
+    actualCash: 'ক্যাশ ইন হ্যান্ড (Actual)',
+    discrepancyMatch: 'হিসাব একদম সঠিক আছে',
+    discrepancyPlus: 'অতিরিক্ত+',
+    discrepancyMinus: 'ঘাটতি',
+    noteDetails: 'নোটের বিবরণ',
+    noNotes: 'কোন তথ্য ডিটেইলস নেই',
+    digitalBalance: 'ডিজিটাল ব্যালেন্স',
+    additionalNotes: 'অতিরিক্ত নোট',
+    printedAt: 'প্রিন্ট হয়েছে',
+    balanceSummary: 'ব্যালেন্স সামারি',
+    prevBalance: 'পূর্বের বাকি',
+    todayBill: 'আজকের বিল',
+    totalPayable: 'মোট প্রদেয়',
+    todayPaid: 'আজকের পরিশোধ',
+    currentBalance: 'বর্তমান মোট বাকি',
+    mobile: 'মোবাইল'
+  }
+};
 
 interface Product {
   id: string;
@@ -242,6 +363,16 @@ interface Employee {
   status: 'active' | 'inactive';
 }
 
+interface RecycleItem {
+  id: string;
+  entityType: 'product' | 'sale' | 'customer' | 'expense' | 'stockRecord' | 'employee' | 'investment' | 'salary' | 'daily_closing' | 'user';
+  originalId: string;
+  data: any;
+  deletedAt: any;
+  deletedBy: string;
+  expiresAt: any;
+}
+
 import { FIXED_CATEGORIES } from './Categories'; //�. পশু স�. বিড়াল পরিচর্যা", " সরঞ্জাম", "৬৬. শিক্ষা সামগ্রী",
 //   "৬৭. পোশাক", "৬৮. পুরুষদের পোশাক", "৬৯. নারীদের পোশাক", "৭০. শিশুদের পোশাক", "৭১. ফ্যাশন আনুষঙ্গিক",
 //   "৭২. খেলনা ও বিনোদন", "৭৩. ক্রীড়া সামগ্রী", "৭৪. আউটডোর সামগ্রী",
@@ -289,124 +420,162 @@ const fileToBase64 = (file: File): Promise<string> => {
     reader.onerror = error => reject(error);
   });
 };
-const printDailyClosing = (closing: DailyClosing, settings: ShopSettings) => {
+
+const moveToRecycleBin = async (entityType: RecycleItem['entityType'], originalId: string, data: any) => {
+  try {
+    const deletedAt = new Date();
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 30);
+    
+    // Clean data of any Firestore specific objects if necessary, though addDoc handles Date/Timestamp
+    const recycleItem: Omit<RecycleItem, 'id'> = {
+      entityType,
+      originalId,
+      data,
+      deletedAt,
+      expiresAt,
+      deletedBy: auth.currentUser?.uid || 'unknown'
+    };
+    
+    await addDoc(collection(db, 'recycleBin'), recycleItem);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, 'recycleBin');
+  }
+};
+const printDailyClosing = (closing: DailyClosing, settings: ShopSettings, user?: any) => {
+  const lang = settings.printLanguage || 'bn';
+  const t = PRINT_TRANSLATIONS[lang];
   const printWindow = window.open('', '_blank');
   if (!printWindow) return;
 
-  const formatBN = (num: number) => toBengaliNumber((num || 0).toFixed(2));
+  const formatVal = (num: number) => lang === 'bn' ? toBengaliNumber((num || 0).toFixed(2)) : (num || 0).toFixed(2);
+  const formatDate = (dateStr: string) => lang === 'bn' ? toBengaliNumber(dateStr) : dateStr;
+  const formatDateTime = (date: Date) => lang === 'bn' ? toBengaliNumber(format(date, 'dd/MM/yyyy hh:mm a')) : format(date, 'dd/MM/yyyy hh:mm a');
   
   const expectedCash = (closing.cashSales || 0) + (closing.collections || 0) - (closing.totalExpenses || 0);
   const discrepancy = (closing.cashInHand || 0) - expectedCash;
 
   const denominationsHtml = Object.entries(closing.denominations)
     .filter(([_, count]) => count > 0)
-    .sort((a, b) => parseInt(b[0]) - parseInt(a[0])) // Sort by high to low
+    .sort((a, b) => parseInt(b[0]) - parseInt(a[0]))
     .map(([val, count]) => `
-      <div style="display: flex; justify-content: space-between; font-size: 11px; font-family: monospace; padding: 2px 0;">
-        <span>${toBengaliNumber(val)} x ${toBengaliNumber(count)}</span>
-        <span>= ${formatBN(parseInt(val) * count)}</span>
+      <div style="display: flex; justify-content: space-between; font-size: 11px; padding: 2px 0; border-bottom: 0.5px solid #000;">
+        <span>${lang === 'bn' ? toBengaliNumber(val) : val} x ${lang === 'bn' ? toBengaliNumber(count) : count}</span>
+        <span style="font-weight: 700;">= ${formatVal(parseInt(val) * count)}</span>
       </div>
     `).join('');
 
+  const userName = user?.displayName || user?.name || user?.username || t.collectedBy || 'Admin';
+
   printWindow.document.write(`
     <!DOCTYPE html>
-    <html lang="bn">
+    <html>
       <head>
-        <title>ডেইলি ক্লোজিং - ${closing.date}</title>
+        <title>${t.dailyReport} - ${closing.date}</title>
         <style>
-          @import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap');
+          @import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Inter:wght@400;600;700&display=swap');
           * { margin: 0; padding: 0; box-sizing: border-box; }
-          @page { margin: 0; size: 80mm auto; }
           body { 
-            font-family: 'Hind Siliguri', sans-serif;
-            width: 72mm; 
+            font-family: ${lang === 'bn' ? "'Hind Siliguri', sans-serif" : "'Inter', sans-serif"};
+            width: ${settings.receiptWidth || '58mm'};
+            max-width: 100%;
             margin: 0 auto; 
-            padding: 8mm 0; 
-            font-size: 12px; 
-            line-height: 1.5;
-            color: #000;
+            padding: 2mm 0; 
+            font-size: 11px; 
+            line-height: 1.2;
+            color: #000 !important;
           }
-          .header { text-align: center; margin-bottom: 15px; border-bottom: 3px double #000; padding-bottom: 10px; }
-          .shop-name { font-size: 22px; font-weight: 700; margin-bottom: 2px; }
-          .report-title { font-size: 14px; font-weight: 700; background: #000; color: #fff; display: inline-block; padding: 4px 15px; margin-top: 8px; border-radius: 20px; }
-          .meta-info { font-size: 11px; margin-top: 8px; color: #333; }
+          .header { text-align: center; margin-bottom: 6px; border-bottom: 1.5px solid #000; padding-bottom: 4px; }
+          .logo { max-width: 25mm; max-height: 15mm; margin: 0 auto 3px auto; display: block; }
+          .shop-name { font-size: 18px; font-weight: 800; text-transform: uppercase; margin-bottom: 1px; color: #000 !important; }
+          .shop-info { font-size: 12px; margin-bottom: 0px; color: #000 !important; font-weight: 500; }
+          .report-title { font-size: 11px; font-weight: 700; background: #000 !important; color: #fff !important; display: inline-block; padding: 2px 8px; margin-top: 4px; border-radius: 3px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           
-          .section { margin-bottom: 18px; }
-          .section-title { font-weight: 700; border-bottom: 1.5px solid #000; margin-bottom: 8px; font-size: 11px; text-transform: uppercase; color: #000; display: flex; justify-content: space-between; }
+          .section { margin-bottom: 6px; page-break-inside: avoid; }
+          .section-title { font-weight: 800; border-bottom: 1.5px solid #000; margin-bottom: 3px; font-size: 11px; text-transform: uppercase; display: flex; justify-content: space-between; padding-bottom: 2px; color: #000 !important; }
           
-          .row { display: flex; justify-content: space-between; margin-bottom: 4px; border-bottom: 0.5px solid #f0f0f0; padding-bottom: 2px; }
-          .row:last-child { border-bottom: none; }
-          .row.bold { font-weight: 700; color: #000; }
-          .row.highlight { background: #f9f9f9; padding: 5px; border-radius: 4px; }
+          .row { display: flex; justify-content: space-between; margin-bottom: 2px; padding-bottom: 2px; border-bottom: 1px solid #000; color: #000 !important; }
+          .row.bold { font-weight: 700; font-size: 11px; border-bottom: 1.5px solid #000; }
+          .row.highlight { font-weight: 800; border-bottom: 1.5px solid #000; border-top: 1.5px solid #000; padding: 4px 0; margin-top: 4px; }
           
-          .total-cash { font-size: 16px; border-top: 2px solid #000; margin-top: 8px; padding-top: 8px; }
-          .discrepancy { font-size: 10px; font-weight: 600; margin-top: 4px; text-align: right; }
+          .grand-total { font-size: 14px; font-weight: 800; border-top: 1.5px solid #000; border-bottom: 1.5px solid #000; padding: 4px 0; margin-top: 4px; }
           
-          .footer { text-align: center; margin-top: 25px; font-size: 10px; border-top: 1px dashed #000; padding-top: 12px; color: #666; }
-          .cash-table { width: 100%; margin-top: 10px; border: 1px solid #ddd; padding: 10px; background: #fcfcfc; border-radius: 6px; }
-          .divider { border-bottom: 1px dashed #ccc; margin: 10px 0; }
+          .footer { text-align: center; margin-top: 10px; font-size: 11px; border-top: 1px dashed #000; padding-top: 6px; page-break-inside: avoid; color: #000 !important; }
+          .cash-table { width: 100%; margin-top: 4px; border: 1.5px solid #000; padding: 4px; }
+          
+          @media print {
+            @page { margin: 0; }
+            body { width: 100%; padding: 4mm 2mm; margin: 0; }
+            html, body {
+               height: auto;
+            }
+          }
         </style>
       </head>
       <body>
         <div class="header">
+          ${settings.logoBase64 ? `<img src="${settings.logoBase64}" class="logo" />` : ''}
           <div class="shop-name">${settings.name}</div>
-          <div style="font-size: 11px;">${settings.address}</div>
-          <div class="report-title">ডেইলি ক্লোজিং রিপোর্ট</div>
-          <div class="meta-info">তারিখ: ${toBengaliNumber(closing.date)}</div>
+          <div class="shop-info">${settings.address}</div>
+          <div class="report-title">${t.dailyReport}</div>
+          <div style="margin-top: 4px; font-weight: 700;">${t.date}: ${formatDate(closing.date)}</div>
+          <div style="margin-top: 2px; font-weight: 600;">Printed By: ${userName}</div>
         </div>
 
         <div class="section">
-          <div class="section-title"><span>বিক্রয় সারসংক্ষেপ</span> <span>(SALES)</span></div>
-          <div class="row"><span>মোট পণ্য বিক্রয়:</span> <span>${formatBN(closing.totalSales)}</span></div>
-          <div class="row"><span>নগদ বিক্রয়:</span> <span>${formatBN(closing.cashSales)}</span></div>
-          <div class="row"><span>বাকি বিক্রয়:</span> <span>${formatBN(closing.dueSales)}</span></div>
-          <div class="row"><span>বাকি আদায় (Collection):</span> <span>${formatBN(closing.collections)}</span></div>
-          <div class="row bold highlight" style="margin-top: 4px;">
-            <span>মোট নগদ প্রাপ্তি:</span> <span>${formatBN((closing.cashSales || 0) + (closing.collections || 0))}</span>
+          <div class="section-title"><span>${lang === 'bn' ? 'বিক্রয় ও সংগ্রহ' : 'Sales & Collection'}</span></div>
+          <div class="row"><span>${t.totalSales}:</span> <span>${formatVal(closing.totalSales)}</span></div>
+          <div class="row"><span>${t.cashSales}:</span> <span>${formatVal(closing.cashSales)}</span></div>
+          <div class="row"><span>${t.dueSales}:</span> <span>${formatVal(closing.dueSales)}</span></div>
+          <div class="row"><span>${t.collection}:</span> <span>${formatVal(closing.collections)}</span></div>
+          <div class="row highlight">
+            <span>${t.totalCashReceived}:</span> <span>${formatVal((closing.cashSales || 0) + (closing.collections || 0))}</span>
           </div>
         </div>
 
         <div class="section">
-          <div class="section-title"><span>খরচ ও ব্যয়</span> <span>(EXPENSES)</span></div>
-          <div class="row"><span>আজকের মোট খরচ:</span> <span style="font-weight: 700;">- ${formatBN(closing.totalExpenses)}</span></div>
+          <div class="section-title"><span>${t.expenses}</span></div>
+          <div class="row" style="font-weight: 700;">
+            <span>${t.expenses}:</span> <span>- ${formatVal(closing.totalExpenses)}</span>
+          </div>
         </div>
 
         <div class="section">
-          <div class="section-title"><span>নগদ তহবিল হিসাব</span> <span>(CASH)</span></div>
-          <div class="row"><span>হিসাব অনুযায়ী নগদ (Expected):</span> <span>${formatBN(expectedCash)}</span></div>
-          <div class="row bold total-cash">
-            <span>ক্যাশ ইন হ্যান্ড (Actual):</span> <span>${formatBN(closing.cashInHand)}</span>
+          <div class="section-title"><span>${t.closingSummary}</span></div>
+          <div class="row"><span>${t.expectedCash}:</span> <span>${formatVal(expectedCash)}</span></div>
+          <div class="row bold grand-total">
+            <span>${t.actualCash}:</span> <span>${formatVal(closing.cashInHand)}</span>
           </div>
-          <div class="discrepancy" style="color: ${discrepancy >= 0 ? '#10b981' : '#ef4444'}">
-            ${discrepancy === 0 ? 'হিসাব একদম সঠিক আছে' : discrepancy > 0 ? `অতিরিক্ত: + ${formatBN(discrepancy)}` : `ঘাটতি: ${formatBN(discrepancy)}`}
+          <div style="text-align: right; font-weight: 800; font-size: 11px; margin-top: 5px;">
+            ${discrepancy === 0 ? t.discrepancyMatch : discrepancy > 0 ? `${t.discrepancyPlus}: ${formatVal(discrepancy)}` : `${t.discrepancyMinus}: ${formatVal(discrepancy)}`}
           </div>
           
           <div class="cash-table">
-            <div style="font-size: 10px; font-weight: 700; border-bottom: 1px solid #ddd; margin-bottom: 6px; padding-bottom: 2px;">নোটের বিবরণ:</div>
-            ${denominationsHtml || '<div style="font-size: 10px; color: #999; text-align: center; padding: 5px;">কোন তথ্য ডিটেইলস নেই</div>'}
+            <div style="font-weight: 800; border-bottom: 1.5px solid #000; margin-bottom: 6px; padding-bottom: 3px; font-size: 11px;">${t.noteDetails}:</div>
+            ${denominationsHtml || `<div style="text-align: center; padding: 10px; color: #000; font-weight: 600;">${t.noNotes}</div>`}
           </div>
         </div>
 
-        <div class="section" style="margin-bottom: 10px;">
-          <div class="section-title"><span>ডিজিটাল ব্যালেন্স</span> <span>(ONLINE)</span></div>
-          <div class="row"><span>বিকাশ/অনলাইন ব্যালেন্স:</span> <span>${formatBN(closing.bkashBalance)}</span></div>
+        <div class="section">
+          <div class="section-title"><span>${t.digitalBalance}</span></div>
+          <div class="row"><span>${t.bkash}:</span> <span>${formatVal(closing.bkashBalance)}</span></div>
         </div>
 
         ${closing.notes ? `
           <div class="section">
-            <div class="section-title"><span>অতিরিক্ত নোট</span></div>
-            <div style="font-size: 11px; white-space: pre-wrap; color: #444; background: #fffbeb; padding: 8px; border-radius: 4px; border: 1px solid #fef3c7;">${closing.notes}</div>
+            <div class="section-title"><span>${t.additionalNotes}</span></div>
+            <div style="font-size: 11px; white-space: pre-wrap; padding: 10px; border: 1.5px solid #000;">${closing.notes}</div>
           </div>
         ` : ''}
 
         <div class="footer">
-          প্রিন্ট হয়েছে: ${toBengaliNumber(format(new Date(), 'dd/MM/yyyy hh:mm a'))}<br>
-          <div style="margin-top: 5px; font-weight: bold; color: #000;">MasterShop POS - Your Business Partner</div>
+          ${t.printedAt}: ${formatDateTime(new Date())}<br>
+          <div style="margin-top: 6px; font-weight: 800; font-size: 11px; text-transform: uppercase;">${settings.name}</div>
         </div>
         <script>
           window.onload = () => {
             window.print();
-            setTimeout(() => window.close(), 1000);
+            setTimeout(() => window.close(), 1500);
           };
         </script>
       </body>
@@ -416,147 +585,264 @@ const printDailyClosing = (closing: DailyClosing, settings: ShopSettings) => {
 };
 
 const printInvoice = (sale: Sale, settings: ShopSettings) => {
+  const lang = settings.printLanguage || 'bn';
+  const t = PRINT_TRANSLATIONS[lang];
   const printWindow = window.open('', '_blank');
   if (!printWindow) return;
+
+  const formatVal = (num: number) => lang === 'bn' ? toBengaliNumber((num || 0).toFixed(2)) : (num || 0).toFixed(2);
+  const formatDate = (date: Date) => lang === 'bn' ? toBengaliNumber(format(date, 'dd/MM/yy')) : format(date, 'dd/MM/yy');
+  const formatTime = (date: Date) => lang === 'bn' ? toBengaliNumber(format(date, 'HH:mm')) : format(date, 'HH:mm');
 
   const itemsHtml = sale.items.map(item => {
     let qSuffix = '';
     if (item.unit === 'unit') {
-      qSuffix = ' p';
+      qSuffix = lang === 'bn' ? ' পিস' : ' p';
     } else if (item.unit === 'kg') {
       if (item.quantity >= 1) {
-        qSuffix = ' K';
+        qSuffix = lang === 'bn' ? ' কেজি' : ' K';
       } else {
-        qSuffix = ' g';
+        qSuffix = lang === 'bn' ? ' গ্রাম' : ' g';
       }
     }
     
     return `
     <tr>
-      <td style="padding: 5px 0; border-bottom: 1px solid #eee;">${item.productName}</td>
-      <td style="padding: 5px 0; text-align: center; border-bottom: 1px solid #eee;">${toBengaliNumber(item.quantity.toString())}${qSuffix}</td>
-      <td style="padding: 5px 0; text-align: right; border-bottom: 1px solid #eee;">${toBengaliNumber(item.price.toFixed(2))}</td>
-      <td style="padding: 5px 0; text-align: right; border-bottom: 1px solid #eee;">${toBengaliNumber((item.price * item.quantity).toFixed(2))}</td>
+      <td style="padding: 2px 0; vertical-align: top;">
+        <div style="font-weight: 500; font-size: 11px;">${item.productName}</div>
+      </td>
+      <td style="padding: 2px 0; text-align: center; vertical-align: top; font-size: 11px;">
+        ${lang === 'bn' ? toBengaliNumber(item.quantity.toString()) : item.quantity}${qSuffix}
+      </td>
+      <td style="padding: 2px 0; text-align: right; vertical-align: top; font-size: 11px;">
+        ${formatVal(item.price)}
+      </td>
+      <td style="padding: 2px 0; text-align: right; vertical-align: top; font-size: 11px; font-weight: 600;">
+        ${formatVal(item.price * item.quantity)}
+      </td>
     </tr>`;
   }).join('');
 
   const width = settings.receiptWidth || '58mm';
   const changeAmount = Math.max(0, (sale.paidAmount || 0) - (sale.finalAmount || 0));
   const previousBalance = sale.previousBalance || 0;
-  const formatBN = (num: number) => toBengaliNumber((num || 0).toFixed(2));
 
   const html = `<!DOCTYPE html>
-    <html lang="bn">
+    <html>
       <head>
-        <title>Invoice #${sale.id}</title>
+        <title>${t.invoice} #${sale.id}</title>
         <style>
-          @import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap');
-          @page { margin: 0; size: auto; }
+          @import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Inter:wght@400;600;700&display=swap');
           * { margin: 0; padding: 0; box-sizing: border-box; }
-          html, body { width: 100%; background: #fff; margin: 0; padding: 0; }
           body { 
-            font-family: 'Hind Siliguri', sans-serif; 
-            color: #000; 
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            line-height: 1.4;
-          }
-          .receipt-container {
+            font-family: ${lang === 'bn' ? "'Hind Siliguri', sans-serif" : "'Inter', sans-serif"};
             width: ${width}; 
             max-width: 100%;
-            padding: 5mm 4mm;
-            display: flex;
-            flex-direction: column;
+            margin: 0 auto; 
+            padding: 2mm 0; 
+            font-size: 11px; 
+            line-height: 1.2;
+            color: #000;
           }
-          .header { text-align: center; margin-bottom: 12px; border-bottom: 3.5px solid #000; padding-bottom: 15px; }
-          .logo { max-width: 25mm; max-height: 15mm; margin: 0 auto 5px auto; display: block; }
-          .shop-name { font-size: 20px; font-weight: 700; text-transform: uppercase; margin-bottom: 2px; }
-          .shop-info { font-size: 11px; margin-bottom: 2px; color: #333; }
-          .invoice-meta { margin-bottom: 12px; font-size: 11px; border-bottom: 1px solid #000; padding: 8px 0; }
-          table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
-          th { border-bottom: 2px solid #000; font-size: 11px; text-align: left; padding: 8px 0; font-weight: 700; }
-          td { padding: 6px 0; font-size: 11px; vertical-align: top; }
-          .totals { text-align: right; border-top: 1px solid #000; padding-top: 10px; font-size: 12px; }
-          .total-row { font-weight: 700; font-size: 18px; margin-top: 6px; border-top: 2px solid #000; border-bottom: 2px solid #000; padding: 10px 0; margin-bottom: 10px; }
-          .balance-section { border: 1px solid #000; margin-top: 15px; padding: 12px; font-size: 11px; background: #fafafa; border-radius: 8px; }
-          .balance-title { font-weight: 700; text-align: center; border-bottom: 1px solid #000; margin-bottom: 8px; padding-bottom: 4px; font-size: 13px; }
-          .footer { text-align: center; margin-top: 25px; font-size: 10px; border-top: 1px dashed #000; padding-top: 20px; font-weight: 500; }
-          @media print { .no-print { display: none; } }
+          .header { text-align: center; margin-bottom: 2px; }
+          .logo { max-width: 25mm; max-height: 15mm; margin: 0 auto 2px auto; display: block; }
+          .shop-name { font-size: 18px; font-weight: 800; margin-bottom: 1px; color: #000 !important; }
+          .shop-info { font-size: 13px; margin-bottom: 0px; color: #000 !important; font-weight: 600; line-height: 1.3; }
+          
+          .divider { border-bottom: 1.5px solid #000; margin: 2px 0; }
+          .dashed-divider { border-bottom: 1px dashed #000; margin: 2px 0; }
+          
+          .meta-grid { display: flex; justify-content: space-between; font-size: 12px; margin: 2px 0; font-weight: 500; color: #000 !important; }
+          .meta-left { display: flex; flex-direction: column; gap: 1px; }
+          .meta-right { text-align: right; }
+          
+          table { width: 100%; border-collapse: collapse; margin-top: 2px; margin-bottom: 2px; color: #000 !important; }
+          th { font-size: 11px; text-align: left; padding: 2px 0; font-weight: 800; color: #000 !important; border-bottom: 1.5px solid #000;}
+          td { padding: 2px 0; border-bottom: 1px solid #000; font-weight: 500; }
+          
+          .totals { font-size: 12px; margin-top: 2px; page-break-inside: avoid; color: #000 !important; font-weight: 600; }
+          .total-row { display: flex; justify-content: space-between; margin: 1px 0; }
+          .grand-total { display: flex; justify-content: space-between; font-weight: 800; font-size: 15px; margin: 2px 0; }
+          
+          .due-amount { text-align: center; font-weight: 800; font-size: 13px; margin: 2px 0; color: #000 !important; }
+          
+          .footer { text-align: center; font-size: 13px; line-height: 1.2; color: #000 !important; font-weight: 700; margin-top: 4px; page-break-inside: avoid; }
+          
+          @media print {
+            @page { margin: 0; }
+            body { width: 100%; padding: 4mm 2mm; margin: 0; }
+            html, body {
+               height: auto;
+            }
+          }
         </style>
       </head>
       <body>
-        <div class="receipt-container">
-          <div class="header">
-            ${settings.logoBase64 ? `<img src="${settings.logoBase64}" class="logo" />` : ''}
-            <div class="shop-name">${settings.name}</div>
-            <div class="shop-info">${settings.address}</div>
-            ${settings.phone ? `<div class="shop-info">মোবাইল: ${toBengaliNumber(settings.phone)}</div>` : ''}
+        <div class="header">
+          ${settings.logoBase64 ? `<img src="${settings.logoBase64}" class="logo" />` : ''}
+          <div class="shop-name">${settings.name}</div>
+          <div class="shop-info">${settings.address}</div>
+          ${settings.phone ? `<div class="shop-info">${t.mobile}: ${lang === 'bn' ? toBengaliNumber(settings.phone) : settings.phone}</div>` : ''}
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="meta-grid">
+          <div class="meta-left">
+            <span><strong>${t.invoiceId}:</strong> #${lang === 'bn' ? toBengaliNumber(sale.id) : sale.id}</span>
+            <span><strong>${t.customer}:</strong> ${sale.customerName || t.retailSale}${sale.customerPhone ? `<br><strong>${t.phone}:</strong> ${lang === 'bn' ? toBengaliNumber(sale.customerPhone) : sale.customerPhone}` : ''}</span>
           </div>
-          <div class="invoice-meta">
-            <div style="display: flex; justify-content: space-between;">
-              <span style="font-weight: 700;">আইডি: #${toBengaliNumber(sale.id)}</span>
-              <span>${toBengaliNumber(format(safeDate(sale.timestamp), 'dd/MM/yy HH:mm'))}</span>
-            </div>
-            <div style="margin-top: 3px; font-weight: 500;">ক্রেতা: ${sale.customerName || 'খুচরা সেল'}</div>
-            ${sale.customerPhone ? `<div style="margin-top: 1px;">ফোন: ${toBengaliNumber(sale.customerPhone)}</div>` : ''}
-          </div>
-          <table>
-            <thead>
-              <tr>
-                <th style="width: 45%;">আইটেম</th>
-                <th style="width: 15%; text-align: center;">পরিমাণ</th>
-                <th style="width: 20%; text-align: right;">দর</th>
-                <th style="width: 20%; text-align: right;">মোট</th>
-              </tr>
-            </thead>
-            <tbody>${itemsHtml}</tbody>
-          </table>
-          <div class="totals">
-            <div style="display: flex; justify-content: space-between;"><span>সাবটোটাল:</span><span>${formatBN(sale.totalAmount)}</span></div>
-            ${sale.discount > 0 ? `<div style="display: flex; justify-content: space-between;"><span>ডিসকাউন্ট:</span><span>- ${formatBN(sale.discount)}</span></div>` : ''}
-            <div class="total-row" style="display: flex; justify-content: space-between;"><span>সর্বমোট বিল:</span><span>${formatBN(sale.finalAmount)}</span></div>
-            <div style="display: flex; justify-content: space-between;"><span>আজকের জমা:</span><span>${formatBN(sale.paidAmount)}</span></div>
-            ${(changeAmount > 0 && !sale.customerId) ? `<div style="display: flex; justify-content: space-between;"><span>আজ ফেরত:</span><span>${formatBN(changeAmount)}</span></div>` : ''}
-          </div>
-          ${sale.customerId ? `
-          <div class="balance-section">
-            <div class="balance-title">ব্যালেন্স সামারি</div>
-            <div style="display: flex; justify-content: space-between;"><span>পূর্বের বাকি:</span><span>${formatBN(previousBalance)}</span></div>
-            <div style="display: flex; justify-content: space-between;"><span>আজকের বিল:</span><span>${formatBN(sale.finalAmount)}</span></div>
-            <div style="display: flex; justify-content: space-between; border-top: 1px dotted #ccc; margin-top: 3px; padding-top: 3px;"><span>মোট প্রদেয়:</span><span>${formatBN(sale.finalAmount + previousBalance)}</span></div>
-            <div style="display: flex; justify-content: space-between;"><span>আজকের পরিশোধ:</span><span>- ${formatBN(sale.paidAmount)}</span></div>
-            <div style="display: flex; justify-content: space-between; font-weight: 700; font-size: 14px; border-top: 2px solid #000; margin-top: 6px; padding-top: 6px;">
-              <span>বর্তমান মোট বাকি:</span><span>${formatBN(sale.finalAmount + previousBalance - (sale.paidAmount || 0))}</span>
-            </div>
-          </div>
-          ` : `
-            <div style="margin-top: 15px; border-top: 1.5px solid #000; padding-top: 10px; text-align: right; font-weight: 700;">
-              বাকি পরিমাণ: ${formatBN(sale.finalAmount - (sale.paidAmount || 0))}
-            </div>
-          `}
-          <div class="footer">
-            ${settings.receiptFooter ? settings.receiptFooter.replace(/\n/g, '<br>') : `কেনাকাটার জন্য আপনাকে ধন্যবাদ!<br>MasterShop POS - Your Reliable Business Partner`}
+          <div class="meta-right">
+            <span>${formatDate(safeDate(sale.timestamp))} ${formatTime(safeDate(sale.timestamp))}</span>
           </div>
         </div>
-        <script>
-          window.onload = () => {
-            window.print();
-            setTimeout(() => window.close(), 1500);
-          };
-        </script>
-      </body>
-    </html>`;
 
+        <div class="divider"></div>
+
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 50%;">${t.item}</th>
+              <th style="width: 15%; text-align: center;">${t.qty}</th>
+              <th style="width: 15%; text-align: right;">${t.price}</th>
+              <th style="width: 20%; text-align: right;">${t.amount}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td colspan="4" style="padding: 0;"><div class="divider" style="margin: 0;"></div></td></tr>
+            ${itemsHtml}
+          </tbody>
+        </table>
+
+        <div class="divider"></div>
+
+        <div class="totals">
+          <div class="total-row">
+            <span>${t.subtotal}:</span>
+            <span>${formatVal(sale.totalAmount)}</span>
+          </div>
+          
+          ${sale.discount > 0 ? `
+          <div class="total-row">
+            <span>${t.discount}:</span>
+            <span>- ${formatVal(sale.discount)}</span>
+          </div>
+          ` : ''}
+          
+          <div class="divider"></div>
+          
+          <div class="grand-total">
+            <span>${t.grandTotal}:</span>
+            <span>${formatVal(sale.finalAmount)}</span>
+          </div>
+          
+          <div class="divider"></div>
+          
+          <div class="total-row">
+            <span>${t.paid}:</span>
+            <span>${formatVal(sale.paidAmount)}</span>
+          </div>
+          
+          <div class="divider"></div>
+        </div>
+
+        <div class="due-amount">
+          ${t.due}: ${formatVal(sale.finalAmount - (sale.paidAmount || 0))}
+        </div>
+        
+        ${sale.customerId ? `
+        <div class="dashed-divider"></div>
+        <div style="font-size: 10px; font-weight: 500; margin-top: 4px;">
+          <div style="text-align: center; font-weight: 700; margin-bottom: 2px;">${t.balanceSummary}</div>
+          <div style="display: flex; justify-content: space-between;"><span>${t.prevBalance}:</span> <span>${formatVal(previousBalance)}</span></div>
+          <div style="display: flex; justify-content: space-between;"><span>${t.todayBill}:</span> <span>${formatVal(sale.finalAmount)}</span></div>
+          <div style="display: flex; justify-content: space-between;"><span>${t.todayPaid}:</span> <span>- ${formatVal(sale.paidAmount)}</span></div>
+          <div class="divider" style="margin: 2px 0;"></div>
+          <div style="display: flex; justify-content: space-between; font-weight: 700;"><span>${t.currentBalance}:</span> <span>${formatVal(sale.finalAmount + previousBalance - (sale.paidAmount || 0))}</span></div>
+        </div>
+        ` : ''}
+
+        <div class="dashed-divider"></div>
+
+        <div class="footer">
+          <div>${settings.receiptFooter ? settings.receiptFooter.replace(/\n/g, '<br>') : t.footer}</div>
+        </div>
+      </body>
+      <script>
+        window.onload = () => {
+          window.print();
+          setTimeout(() => window.close(), 1500);
+        };
+      </script>
+    </html>
+  `;
   printWindow.document.write(html);
   printWindow.document.close();
 };
 
+const callWhatsAppApi = async (phone: string, message: string, settings: ShopSettings) => {
+  const method = settings.waGatewayType || 'manual';
+  const cleanPhone = phone.replace(/\D/g, '');
+  const formattedPhone = cleanPhone.startsWith('880') ? cleanPhone : `880${cleanPhone.startsWith('0') ? cleanPhone.slice(1) : cleanPhone}`;
+
+  if (method !== 'manual' && settings.waToken) {
+    try {
+      let finalResponse;
+      if (method === 'metacloud' && settings.waPhoneNumberId) {
+        const url = `https://graph.facebook.com/v20.0/${settings.waPhoneNumberId}/messages`;
+        finalResponse = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${settings.waToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            messaging_product: "whatsapp",
+            recipient_type: "individual",
+            to: formattedPhone,
+            type: "text",
+            text: { body: message }
+          })
+        });
+      } else if (method === 'generic' && settings.waApiUrl) {
+        let body: any = {};
+        if (settings.waApiUrl?.includes('ultramsg')) {
+          body = { token: settings.waToken, to: formattedPhone, body: message };
+        } else {
+          body = { instance: settings.waInstanceId, token: settings.waToken, to: formattedPhone, message };
+        }
+        finalResponse = await fetch(settings.waApiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+      }
+
+      if (finalResponse) {
+        const result = await finalResponse.json();
+        if (finalResponse.ok) {
+          return { success: true, result };
+        } else {
+          return { success: false, error: result };
+        }
+      }
+    } catch (error) {
+      return { success: false, error };
+    }
+  }
+
+  // Fallback to manual
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  if (isMobile) {
+    window.open(`https://wa.me/${formattedPhone}?text=${encodeURIComponent(message)}`, '_blank');
+  } else {
+    window.open(`https://web.whatsapp.com/send?phone=${formattedPhone}&text=${encodeURIComponent(message)}`, '_blank');
+  }
+  return { success: true, fallback: true };
+};
+
 const sendWhatsAppInvoice = async (sale: Sale, settings: ShopSettings, lang: 'en' | 'bn' = 'en') => {
   if (!sale.customerPhone) return;
-  
-  const cleanPhone = sale.customerPhone.replace(/\D/g, '');
-  const formattedPhone = cleanPhone.startsWith('880') ? cleanPhone : `880${cleanPhone.startsWith('0') ? cleanPhone.slice(1) : cleanPhone}`;
   
   const template = lang === 'bn' ? (settings.waTemplateBengali || "") : (settings.waTemplateEnglish || "");
   
@@ -583,7 +869,6 @@ const sendWhatsAppInvoice = async (sale: Sale, settings: ShopSettings, lang: 'en
     const itemsText = sale.items.map(item => `• ${item.productName}: ${item.quantity} x ${item.price} = ${item.price * item.quantity}`).join('\n');
     const previousBalance = sale.previousBalance || 0;
     const currentDue = sale.finalAmount - sale.paidAmount;
-    const totalBalance = previousBalance + currentDue;
     message = `*আমাদের স্টোর ${settings.name} থেকে ইনভয়েস*\n` +
       `ইনভয়েস: #${sale.id}\n` +
       `তারিখ: ${format(safeDate(sale.timestamp), 'dd/MM/yyyy')}\n\n` +
@@ -600,41 +885,13 @@ const sendWhatsAppInvoice = async (sale: Sale, settings: ShopSettings, lang: 'en
       `আপনার কেনাকাটার জন্য ধন্যবাদ!`;
   }
 
-  const isAuto = settings.autoSendWhatsApp;
-  const method = settings.waGatewayType || 'manual';
-
-  // If Gateway settings are provided AND auto-send is enabled, send in the background
-  if (isAuto && settings.waToken && (settings.waPhoneNumberId || settings.waApiUrl)) {
-    try {
-      console.log('Initiating automatic background WhatsApp delivery...');
-      const response = await fetch('/api/whatsapp/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          method: method,
-          apiUrl: settings.waApiUrl,
-          token: settings.waToken,
-          instanceId: settings.waInstanceId,
-          phoneNumberId: settings.waPhoneNumberId,
-          phone: formattedPhone,
-          message: message
-        }),
-      });
-      
-      const result = await response.json();
-      if (result.success) {
-        console.log('✅ WhatsApp message sent automatically through server gateway.');
-      } else {
-        console.error('❌ Automatic delivery failed:', result.data || result.error);
-      }
-    } catch (error) {
-      console.error('❌ Network error during automatic WhatsApp delivery:', error);
+  const result = await callWhatsAppApi(sale.customerPhone, message, settings);
+  if (!result.fallback) {
+    if (result.success) {
+      console.log('✅ WhatsApp invoice sent automatically.');
+    } else {
+      console.error('❌ Automatic delivery failed:', result.error);
     }
-  } else if (!isAuto) {
-    // Manual or fallback: ONLY open window if auto-send is strictly disabled
-    window.open(`https://wa.me/${formattedPhone}?text=${encodeURIComponent(message)}`, '_blank');
-  } else {
-    console.warn('Auto-send is enabled but settings are incomplete. Skipping automatic message to avoid popups.');
   }
 };
 
@@ -647,28 +904,15 @@ const testWhatsAppConnection = async (settings: ShopSettings) => {
   const testPhone = prompt('Enter a WhatsApp number to test (with country code, e.g., 88017...):');
   if (!testPhone) return;
 
-  try {
-    const response = await fetch('/api/whatsapp/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        method: settings.waGatewayType || 'metacloud',
-        apiUrl: settings.waApiUrl,
-        token: settings.waToken,
-        instanceId: settings.waInstanceId,
-        phoneNumberId: settings.waPhoneNumberId,
-        phone: testPhone.replace(/\D/g, ''),
-        message: 'MasterShop WhatsApp Automation Test Message. Connection successful! ✅'
-      }),
-    });
-    const result = await response.json();
-    if (result.success) {
-      alert('Test Message Sent Successfully!');
-    } else {
-      alert('Failed to send test message: ' + JSON.stringify(result.data || result.error));
-    }
-  } catch (error) {
-    alert('Error connecting to automation gateway.');
+  const msg = 'MasterShop WhatsApp Automation Test Message. Connection successful! ✅';
+  const result = await callWhatsAppApi(testPhone, msg, settings);
+  
+  if (result.fallback) {
+    alert('Opened manual WhatsApp window (Background API may not be completely configured).');
+  } else if (result.success) {
+    alert('Test Message Sent Successfully in the background!');
+  } else {
+    alert('Failed to send test message: ' + JSON.stringify(result.error));
   }
 };
 
@@ -829,6 +1073,7 @@ function SettingsPanel({ settings, onSaveSettings, users, onAddUser, onDeleteUse
       receiptFooter: formData.get('receiptFooter') as string,
       waTemplateEnglish: formData.get('waTemplateEnglish') as string,
       waTemplateBengali: formData.get('waTemplateBengali') as string,
+      printLanguage: formData.get('printLanguage') as 'en' | 'bn',
     });
   };
 
@@ -933,6 +1178,14 @@ function SettingsPanel({ settings, onSaveSettings, users, onAddUser, onDeleteUse
                     <p className="text-xs">আপনার অ্যান্ড্রয়েড ফোনে "WhatsApp Gateway" অ্যাপ ব্যবহার করে আপনার নাম্বার থেকেই অটোমেটিক মেসেজ পাঠাতে পারবেন।</p>
                   </div>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Print Language (প্রিন্টিং ভাষা)</label>
+                <select name="printLanguage" defaultValue={settings.printLanguage || 'bn'} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none">
+                  <option value="bn">Bengali (বাংলা)</option>
+                  <option value="en">English (ইংরেজি)</option>
+                </select>
               </div>
 
               <div>
@@ -1119,6 +1372,115 @@ function SettingsPanel({ settings, onSaveSettings, users, onAddUser, onDeleteUse
   );
 }
 
+function RecycleBin({ items, onRestore }: { items: RecycleItem[], onRestore: (item: RecycleItem) => void }) {
+  const [searchTerm, setSearchTerm] = useState('');
+  
+  const filteredItems = items.filter(item => {
+    const searchStr = searchTerm.toLowerCase();
+    const typeStr = item.entityType.toLowerCase();
+    const dataStr = JSON.stringify(item.data).toLowerCase();
+    return typeStr.includes(searchStr) || dataStr.includes(searchStr);
+  });
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="space-y-6"
+    >
+      <header className="flex items-center justify-between">
+        <div>
+          <h2 className="text-3xl font-bold text-gray-900">Recycle Bin</h2>
+          <p className="text-gray-500">Items are kept for 30 days before permanent deletion.</p>
+        </div>
+      </header>
+
+      <div className="flex flex-col md:flex-row gap-4 mb-6">
+        <div className="relative flex-1">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+          <input 
+            type="text"
+            placeholder="Search deleted items..."
+            className="w-full pl-12 pr-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+        <table className="w-full text-left">
+          <thead className="bg-gray-50 border-b border-gray-100">
+            <tr>
+              <th className="px-6 py-4 text-sm font-semibold text-gray-600">Type</th>
+              <th className="px-6 py-4 text-sm font-semibold text-gray-600">Name/Description</th>
+              <th className="px-6 py-4 text-sm font-semibold text-gray-600">Deleted Date</th>
+              <th className="px-6 py-4 text-sm font-semibold text-gray-600">Auto Delete</th>
+              <th className="px-6 py-4 text-sm font-semibold text-gray-600 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {filteredItems.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="px-6 py-20 text-center text-gray-400 font-medium">
+                  No items found in the recycle bin.
+                </td>
+              </tr>
+            ) : (
+              filteredItems.map(item => {
+                const deletedDate = safeDate(item.deletedAt);
+                const expiryDate = safeDate(item.expiresAt);
+                const daysRemaining = Math.ceil((expiryDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+                
+                let displayName = "Unknown";
+                if (item.entityType === 'product') displayName = item.data.name;
+                if (item.entityType === 'sale') displayName = `Invoice #${item.data.id} - ${item.data.customerName || 'Walk-in'}`;
+                if (item.entityType === 'customer') displayName = item.data.name;
+                if (item.entityType === 'user') displayName = item.data.displayName;
+                if (item.entityType === 'employee') displayName = item.data.name;
+                if (item.entityType === 'expense') displayName = item.data.description;
+                if (item.entityType === 'investment') displayName = item.data.description;
+                if (item.entityType === 'salary') displayName = item.data.staffName;
+                if (item.entityType === 'daily_closing') displayName = `Daily Closing - ${format(safeDate(item.data.timestamp), 'dd MMM yyyy')}`;
+
+                return (
+                  <tr key={item.id} className="hover:bg-gray-50/50 transition-colors">
+                    <td className="px-6 py-4">
+                      <span className="px-3 py-1 bg-gray-100 text-gray-600 rounded-full text-[10px] font-bold uppercase">
+                        {item.entityType.replace('_', ' ')}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 font-medium text-gray-900">{displayName}</td>
+                    <td className="px-6 py-4 text-sm text-gray-600">{format(deletedDate, 'dd MMM yyyy, hh:mm a')}</td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col">
+                        <span className={`text-sm ${daysRemaining <= 5 ? 'text-red-500 font-bold' : 'text-gray-600'}`}>
+                          {daysRemaining > 0 ? `${daysRemaining} days left` : 'Cleaning up soon...'}
+                        </span>
+                        <span className="text-[10px] text-gray-400">{format(expiryDate, 'dd MMM yyyy')}</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <button 
+                        onClick={() => onRestore(item)}
+                        className="flex items-center gap-1 ml-auto px-3 py-1 bg-green-50 text-green-600 rounded-lg hover:bg-green-100 transition-all font-semibold text-xs border border-green-100"
+                        title="Restore Item"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        Restore
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    </motion.div>
+  );
+}
+
 export default function App() {
   console.log("ShopMaster App Initializing...");
   const [user, setUser] = useState<any>(null);
@@ -1175,6 +1537,7 @@ export default function App() {
   const [investments, setInvestments] = useState<Investment[]>([]);
   const [staffSalaries, setStaffSalaries] = useState<StaffSalary[]>([]);
   const [dailyClosings, setDailyClosings] = useState<DailyClosing[]>([]);
+  const [recycleBin, setRecycleBin] = useState<RecycleItem[]>([]);
   const [shopSettings, setShopSettings] = useState<ShopSettings>({
     name: 'Bismillah Store',
     address: 'Your Shop Address',
@@ -1184,13 +1547,38 @@ export default function App() {
     waGatewayType: 'manual',
     autoSendWhatsApp: false,
     waTemplateEnglish: "Hello *{{customerName}}*, thank you for shopping at *{{shopName}}*! Your invoice #{{invoiceId}} total is TK {{totalAmount}}.",
-    waTemplateBengali: "প্রিয় *{{customerName}}*, *{{shopName}}*-এ কেনাকাটা করার জন্য ধন্যবাদ! আপনার ইনভয়েস #{{invoiceId}} এর মোট পরিমাণ {{totalAmount}} টাকা।"
+    waTemplateBengali: "প্রিয় *{{customerName}}*, *{{shopName}}*-এ কেনাকাটা করার জন্য ধন্যবাদ! আপনার ইনভয়েস #{{invoiceId}} এর মোট পরিমাণ {{totalAmount}} টাকা।",
+    printLanguage: 'bn'
   });
   
   // POS State
   const [cart, setCart] = useState<CartItem[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [discount, setDiscount] = useState(0);
+  
+  // Auto-Cleanup logic for Recycle Bin (30 days)
+  useEffect(() => {
+    if (!user || user.role !== 'admin') return;
+    if (recycleBin.length === 0) return;
+
+    const now = new Date();
+    const expiredItems = recycleBin.filter(item => {
+      const expiry = safeDate(item.expiresAt);
+      return expiry <= now;
+    });
+
+    if (expiredItems.length > 0) {
+      console.log(`Auto-cleaning ${expiredItems.length} expired items from Recycle Bin...`);
+      expiredItems.forEach(async (item) => {
+        try {
+          // In actual production, you might want to batch this
+          await deleteDoc(doc(db, 'recycleBin', item.id));
+        } catch (e) {
+          console.error("Auto-cleanup error for item", item.id, e);
+        }
+      });
+    }
+  }, [recycleBin, user]);
 
   // Auto-dismiss notification
   useEffect(() => {
@@ -1265,6 +1653,10 @@ export default function App() {
       setEmployees(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Employee)));
     }, (err) => console.error("Employees sync error", err));
 
+    const unsubRecycleBin = onSnapshot(collection(db, 'recycleBin'), (snapshot) => {
+      setRecycleBin(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as RecycleItem)));
+    }, (err) => console.error("Recycle bin sync error", err));
+
     return () => {
       unsubProducts();
       unsubSales();
@@ -1278,6 +1670,16 @@ export default function App() {
       unsubEmployees();
     };
   }, [user, auth.currentUser]);
+
+  const handleDeleteDailyClosing = async (closing: DailyClosing) => {
+    try {
+      await moveToRecycleBin('daily_closing', closing.id, closing);
+      await deleteDoc(doc(db, 'daily_closings', closing.id));
+      setNotification({ message: 'Daily Closing moved to Recycle Bin', type: 'success' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'daily_closings');
+    }
+  };
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1302,6 +1704,35 @@ export default function App() {
   const handleLogout = () => {
     setUser(null);
     localStorage.removeItem('shopmaster_user');
+  };
+
+  const handleGoogleLogin = async () => {
+    try {
+      setLoading(true);
+      const result = await signInWithPopup(auth, googleProvider);
+      const googleUser = result.user;
+      
+      const isMasterAdmin = googleUser.email === "stratproamz@gmail.com";
+      const existingAppUser = appUsers.find(u => u.username.toLowerCase() === googleUser.email?.split('@')[0].toLowerCase());
+      
+      const role = isMasterAdmin ? 'admin' : (existingAppUser?.role || 'sales_team');
+      
+      const userData = { 
+        uid: googleUser.uid, 
+        email: googleUser.email || '', 
+        displayName: googleUser.displayName || googleUser.email?.split('@')[0] || 'Google User', 
+        role 
+      };
+      
+      setUser(userData);
+      localStorage.setItem('shopmaster_user', JSON.stringify(userData));
+      setNotification({ message: `Signed in as ${userData.displayName}`, type: 'success' });
+    } catch (error: any) {
+      console.error("Google login error", error);
+      setAuthError(`Google Sign-In failed: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   // --- POS Logic ---
@@ -1376,7 +1807,8 @@ export default function App() {
     setCart(prev => prev.map(item => {
       if (item.id === productId) {
         const newQty = Math.max(0, quantity);
-        return { ...item, quantity: newQty };
+        const newPrice = calculateItemPrice(item, newQty);
+        return { ...item, quantity: newQty, discountedPrice: newPrice };
       }
       return item;
     }));
@@ -1508,8 +1940,8 @@ export default function App() {
       setEditingSale(null);
       setShowReceiptModal(true);
 
-      // Auto Send WhatsApp if customer has phone
-      if (finalSale.customerPhone) {
+      // Auto Send WhatsApp if customer has phone and auto-send is enabled
+      if (finalSale.customerPhone && shopSettings.autoSendWhatsApp) {
         sendWhatsAppInvoice(finalSale, shopSettings, 'bn');
       }
     } catch (error) {
@@ -1520,11 +1952,9 @@ export default function App() {
   const handleDeleteSale = async (sale: Sale) => {
     if (loading) return;
     
-    // Confirmation is now handled in the UI component (SalesHistory) via setConfirmDeleteId
-    
     try {
       setLoading(true);
-      setNotification({ message: "Deleting invoice and reverting balances...", type: 'info' });
+      setNotification({ message: "Moving invoice to Recycle Bin and reverting balances...", type: 'info' });
 
       // Revert stock
       if (sale.items && Array.isArray(sale.items)) {
@@ -1555,11 +1985,83 @@ export default function App() {
         }
       }
 
+      // Move to recycle bin
+      await moveToRecycleBin('sale', sale.id, sale);
+
+      // Delete original
       await deleteDoc(doc(db, 'sales', sale.id));
-      setNotification({ message: "Invoice deleted successfully", type: 'success' });
+
+      setNotification({ message: "Invoice moved to Recycle Bin", type: 'success' });
     } catch (error) {
       console.error("Delete sale error:", error);
-      setNotification({ message: `Failed to delete invoice: ${error instanceof Error ? error.message : 'Unknown error'}`, type: 'error' });
+      setNotification({ message: `Failed to move invoice to Recycle Bin: ${error instanceof Error ? error.message : 'Unknown error'}`, type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRestoreRecycleItem = async (item: RecycleItem) => {
+    try {
+      setLoading(true);
+      setNotification({ message: `Restoring ${item.entityType}...`, type: 'info' });
+
+      let targetCollection = '';
+      switch (item.entityType) {
+        case 'product': targetCollection = 'products'; break;
+        case 'sale': targetCollection = 'sales'; break;
+        case 'customer': targetCollection = 'customers'; break;
+        case 'expense': targetCollection = 'expenses'; break;
+        case 'employee': targetCollection = 'employees'; break;
+        case 'investment': targetCollection = 'investments'; break;
+        case 'user': targetCollection = 'users'; break;
+        case 'salary': targetCollection = 'staff_salaries'; break;
+        case 'daily_closing': targetCollection = 'daily_closings'; break;
+        case 'stockRecord': targetCollection = 'stockRecords'; break;
+      }
+
+      if (!targetCollection) throw new Error("Invalid entity type");
+
+      // Restore data with original ID
+      await setDoc(doc(db, targetCollection, item.originalId), item.data);
+
+      // If it was a sale, we might need to re-deduct stock
+      if (item.entityType === 'sale') {
+        const sale = item.data as Sale;
+        if (sale.items && Array.isArray(sale.items)) {
+          for (const sItem of sale.items) {
+            if (sItem.productId) {
+              try {
+                const productRef = doc(db, 'products', sItem.productId);
+                await updateDoc(productRef, { 
+                  stock: increment(-Number(sItem.quantity) || 0) 
+                });
+              } catch (e) {
+                console.warn(`Could not deduct stock for restored product ${sItem.productId}:`, e);
+              }
+            }
+          }
+        }
+        // Re-apply customer balance
+        if (sale.customerId) {
+          try {
+            const customerRef = doc(db, 'customers', sale.customerId);
+            await updateDoc(customerRef, {
+              currentDue: increment(sale.totalAmount - sale.paidAmount),
+              totalSpent: increment(sale.totalAmount)
+            });
+          } catch (e) {
+            console.warn(`Could not re-apply balance for restored customer ${sale.customerId}:`, e);
+          }
+        }
+      }
+
+      // Delete from recycle bin (Rules must be updated to allow admin to delete before expiry)
+      await deleteDoc(doc(db, 'recycleBin', item.id));
+
+      setNotification({ message: `${item.entityType} restored successfully`, type: 'success' });
+    } catch (error) {
+      console.error("Restore error", error);
+      handleFirestoreError(error, OperationType.WRITE, `restore_${item.entityType}`);
     } finally {
       setLoading(false);
     }
@@ -1598,6 +2100,46 @@ export default function App() {
     }
   }, [showReceiptModal, lastCompletedSale]);
 
+  const handleDeleteExpense = async (expense: Expense) => {
+    try {
+      await moveToRecycleBin('expense', expense.id, expense);
+      await deleteDoc(doc(db, 'expenses', expense.id));
+      setNotification({ message: 'Expense moved to Recycle Bin', type: 'success' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'expenses');
+    }
+  };
+
+  const handleDeleteInvestment = async (investment: Investment) => {
+    try {
+      await moveToRecycleBin('investment', investment.id, investment);
+      await deleteDoc(doc(db, 'investments', investment.id));
+      setNotification({ message: 'Investment moved to Recycle Bin', type: 'success' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'investments');
+    }
+  };
+
+  const handleDeleteStaffSalary = async (salary: StaffSalary) => {
+    try {
+      await moveToRecycleBin('salary', salary.id, salary);
+      await deleteDoc(doc(db, 'staff_salaries', salary.id));
+      setNotification({ message: 'Salary record moved to Recycle Bin', type: 'success' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'staff_salaries');
+    }
+  };
+
+  const handleDeleteStockRecord = async (record: StockRecord) => {
+    try {
+      await moveToRecycleBin('stockRecord', record.id, record);
+      await deleteDoc(doc(db, 'stockRecords', record.id));
+      setNotification({ message: 'Stock record moved to Recycle Bin', type: 'success' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'stockRecords');
+    }
+  };
+
   const handleSaveSettings = async (newSettings: ShopSettings) => {
     try {
       await setDoc(doc(db, 'settings', 'shop'), newSettings);
@@ -1625,8 +2167,12 @@ export default function App() {
 
   const handleDeleteUser = async (userId: string) => {
     try {
+      const userToDelete = appUsers.find(u => u.id === userId);
+      if (userToDelete) {
+        await moveToRecycleBin('user', userId, userToDelete);
+      }
       await deleteDoc(doc(db, 'users', userId));
-      setNotification({ message: 'User deleted successfully', type: 'success' });
+      setNotification({ message: 'User moved to Recycle Bin', type: 'success' });
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, 'users');
     }
@@ -1652,8 +2198,12 @@ export default function App() {
 
   const handleDeleteEmployee = async (id: string) => {
     try {
+      const employeeToDelete = employees.find(e => e.id === id);
+      if (employeeToDelete) {
+        await moveToRecycleBin('employee', id, employeeToDelete);
+      }
       await deleteDoc(doc(db, 'employees', id));
-      setNotification({ message: 'Employee deleted successfully', type: 'success' });
+      setNotification({ message: 'Employee moved to Recycle Bin', type: 'success' });
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, 'employees');
     }
@@ -1696,6 +2246,26 @@ export default function App() {
       setNotification({ message: `Product with barcode ${barcode} not found. Redirecting to Inventory...`, type: 'info' });
       setIsScannerOpen(false);
       setTimeout(() => setActiveTab('inventory'), 1500);
+    }
+  };
+
+  const handleSendWhatsAppReminder = async (customer: Customer, lang: 'en' | 'bn') => {
+    let message = "";
+    if (lang === 'bn') {
+      message = `আসসালামু আলাইকুম ${customer.name}, আপনার বকেয়া বিলের পরিমাণ TK ${customer.currentDue?.toFixed(2)}। ${customer.dueDate ? `আপনার প্রতিশ্রুত তারিখ ছিল ${format(new Date(customer.dueDate), 'dd MMM yyyy')}।` : ''} অনুগ্রহ করে যত দ্রুত সম্ভব বিলটি পরিশোধ করুন। ধন্যবাদ!`;
+    } else {
+      message = `Assalamu Alaikum ${customer.name}, this is a reminder regarding your outstanding due of TK ${customer.currentDue?.toFixed(2)}. ${customer.dueDate ? `Your promised date was ${format(new Date(customer.dueDate), 'dd MMM yyyy')}.` : ''} Please settle the amount as soon as possible. Thank you!`;
+    }
+    
+    setNotification({ message: 'Sending WhatsApp reminder...', type: 'info' });
+    const result = await callWhatsAppApi(customer.phone, message, shopSettings);
+    
+    if (result.fallback) {
+      setNotification({ message: 'Opened WhatsApp manually.', type: 'info' });
+    } else if (result.success) {
+      setNotification({ message: 'Reminder sent automatically!', type: 'success' });
+    } else {
+      setNotification({ message: `Failed to send automatically: ${JSON.stringify(result.error)}`, type: 'error' });
     }
   };
 
@@ -1762,6 +2332,25 @@ export default function App() {
             >
               Sign In
             </button>
+
+            <div className="relative my-6 text-center">
+              <span className="bg-white px-4 text-gray-400 text-sm">OR</span>
+              <div className="absolute inset-y-1/2 left-0 right-0 border-t border-gray-100 -z-10"></div>
+            </div>
+
+            <button 
+              type="button"
+              onClick={handleGoogleLogin}
+              className="w-full py-4 bg-white text-gray-700 border border-gray-200 rounded-xl font-semibold hover:bg-gray-50 transition-all flex items-center justify-center gap-2"
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+              </svg>
+              Sign in with Google
+            </button>
           </form>
         </motion.div>
       </div>
@@ -1825,6 +2414,7 @@ export default function App() {
               { id: 'daily_closing', icon: Clock, label: 'Daily Closing', roles: ['admin', 'manager'] },
               { id: 'accounting', icon: CalculatorIcon, label: 'Hishab Nikash', roles: ['admin', 'manager'] },
               { id: 'settings', icon: Settings, label: 'Settings', roles: ['admin'] },
+              { id: 'recycle_bin', icon: Trash2, label: 'Recycle Bin', roles: ['admin'] },
             ].filter(item => item.roles.includes(user.role)).map(item => (
               <button
                 key={item.id}
@@ -1874,6 +2464,8 @@ export default function App() {
                 customers={customers} 
                 expenses={expenses}
                 dailyClosings={dailyClosings}
+                settings={shopSettings}
+                onDelete={handleDeleteDailyClosing}
                 onViewProductHistory={(p) => {
                   setSelectedProductForHistory(p);
                 }}
@@ -1881,6 +2473,7 @@ export default function App() {
             )}
             {activeTab === 'pos' && (
               <POS 
+                sales={sales}
                 products={products} 
                 cart={cart} 
                 addToCart={addToCart} 
@@ -1904,6 +2497,7 @@ export default function App() {
                   setCheckoutData({ customerId: '', paidAmount: 0, paymentMethod: 'cash' });
                 }}
                 settings={shopSettings}
+                setNotification={setNotification}
               />
             )}
             {activeTab === 'inventory' && (
@@ -1947,6 +2541,8 @@ export default function App() {
                 expenses={expenses} 
                 dailyClosings={dailyClosings}
                 settings={shopSettings}
+                user={user}
+                onDelete={handleDeleteDailyClosing}
               />
             )}
             {activeTab === 'accounting' && (
@@ -1960,6 +2556,10 @@ export default function App() {
                 onAddExpense={handleAddExpense}
                 onAddInvestment={handleAddInvestment}
                 onAddSalary={handleAddStaffSalary}
+                onDeleteExpense={handleDeleteExpense}
+                onDeleteInvestment={handleDeleteInvestment}
+                onDeleteSalary={handleDeleteStaffSalary}
+                onSendWhatsAppReminder={handleSendWhatsAppReminder}
               />
             )}
             {activeTab === 'settings' && (
@@ -1969,6 +2569,12 @@ export default function App() {
                 users={appUsers}
                 onAddUser={handleAddUser}
                 onDeleteUser={handleDeleteUser}
+              />
+            )}
+            {activeTab === 'recycle_bin' && (
+              <RecycleBin 
+                items={recycleBin} 
+                onRestore={handleRestoreRecycleItem} 
               />
             )}
           </AnimatePresence>
@@ -2178,6 +2784,7 @@ export default function App() {
             sales={sales} 
             stockRecords={stockRecords}
             onClose={() => setSelectedProductForHistory(null)} 
+            onDeleteStockRecord={handleDeleteStockRecord}
           />
         )}
       </div>
@@ -2230,7 +2837,7 @@ function BarcodeScanner({ onScan, onClose }: { onScan: (data: string) => void, o
   );
 }
 
-function Dashboard({ products, sales, customers, expenses, dailyClosings, onViewProductHistory }: { products: Product[], sales: Sale[], customers: Customer[], expenses: Expense[], dailyClosings: DailyClosing[], onViewProductHistory: (p: Product) => void }) {
+function Dashboard({ products, sales, customers, expenses, dailyClosings, settings, onDelete, onViewProductHistory }: { products: Product[], sales: Sale[], customers: Customer[], expenses: Expense[], dailyClosings: DailyClosing[], settings: ShopSettings, onDelete: (closing: DailyClosing) => void, onViewProductHistory: (p: Product) => void }) {
   const [period, setPeriod] = useState<'day' | 'week' | 'month' | 'year'>('day');
   const [viewMetric, setViewMetric] = useState<'revenue' | 'profit'>('revenue');
   const now = new Date();
@@ -2643,7 +3250,7 @@ function AlertBox({ icon: Icon, label, count, color, bgColor, items, onItemClick
   );
 }
 
-function ProductHistory({ product, sales, stockRecords, onClose }: { product: Product, sales: Sale[], stockRecords: StockRecord[], onClose: () => void }) {
+function ProductHistory({ product, sales, stockRecords, onClose, onDeleteStockRecord }: { product: Product, sales: Sale[], stockRecords: StockRecord[], onClose: () => void, onDeleteStockRecord: (record: StockRecord) => void }) {
   const productSales = sales.filter(s => s.items.some(item => item.productId === product.id));
   const productStockRecords = stockRecords.filter(r => r.productId === product.id);
   
@@ -2747,11 +3354,20 @@ function ProductHistory({ product, sales, stockRecords, onClose }: { product: Pr
                             </div>
                           </div>
                         </div>
-                        {record.note && (
-                          <div className="max-w-[150px] text-right">
-                            <p className="text-[10px] text-gray-400 italic truncate" title={record.note}>{record.note}</p>
-                          </div>
-                        )}
+                        <div className="flex items-center gap-2">
+                          {record.note && (
+                            <div className="max-w-[150px] text-right">
+                              <p className="text-[10px] text-gray-400 italic truncate" title={record.note}>{record.note}</p>
+                            </div>
+                          )}
+                          <button 
+                            onClick={() => {if(confirm('Delete this stock record?')) onDeleteStockRecord(record)}}
+                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                            title="Delete Record"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                 </div>
@@ -3081,6 +3697,7 @@ function EmployeeManagement({ employees, onAdd, onUpdate, onDelete }: { employee
 }
 
 function POS({ 
+  sales,
   products, 
   cart, 
   addToCart, 
@@ -3099,25 +3716,191 @@ function POS({
   onScanClick,
   editingSale,
   onCancelEdit,
-  settings
+  settings,
+  setNotification
 }: any) {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [customerSearch, setCustomerSearch] = useState('');
   const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  
+
+  const handleVoiceCommand = (rawText: string) => {
+    let lowerText = rawText.toLowerCase().trim();
+    
+    // Check if customer search
+    const customerPrefixes = ['কাস্টমার ', 'ক্রেতা ', 'customer '];
+    for (const prefix of customerPrefixes) {
+      if (lowerText.startsWith(prefix)) {
+          const custName = rawText.substring(prefix.length).trim();
+          setCustomerSearch(custName);
+          setIsCustomerDropdownOpen(true);
+          setNotification({ type: 'info', message: `Searching for customer: ${custName}` });
+          return;
+      }
+    }
+
+    // Otherwise treat as adding to cart
+    const { originalText, searchName, quantity, matchFound } = parseVoiceCommandQuantity(rawText);
+    
+    if (!searchName && !originalText) return;
+
+    const calculateScore = (targetText: string, searchStr: string, phoneticSearch: string, sWords: string[]) => {
+      let score = 0;
+      const tName = standardizeBn(targetText);
+      const phoneticTName = toPhonetic(tName);
+      
+      if (tName === searchStr) score += 100;
+      if (phoneticTName === phoneticSearch && phoneticSearch.length > 2) score += 90;
+      if (tName.includes(searchStr)) score += 50;
+      if (phoneticTName.includes(phoneticSearch) && phoneticSearch.length > 3) score += 40;
+      
+      const wordsMatch = sWords.filter((w: string) => tName.includes(w)).length;
+      score += wordsMatch * 10;
+      
+      const tWords = tName.split(/\s+/).filter((w: string) => w.length > 0);
+      const phoneticWordsMatch = sWords.filter((w: string) => {
+          const phW = toPhonetic(w);
+          return phW.length > 0 && tWords.some((pw: string) => {
+              const phT = toPhonetic(pw);
+              return phT === phW || phT.includes(phW) || (phW.length > 2 && phW.includes(phT));
+          });
+      }).length;
+      score += phoneticWordsMatch * 8;
+      
+      return score;
+    };
+
+    let matchProduct = null;
+    let activeQuantity = quantity;
+
+    // Tier 1: exact string matching trying to avoid cutting off embedded numbers
+    const stdOriginalText = standardizeBn(originalText || rawText);
+    const phOriginalText = toPhonetic(stdOriginalText);
+    const origWords = stdOriginalText.split(/\s+/).filter((w: string) => w.length > 0);
+    
+    if (origWords.length > 0) {
+       const directMatches = products.map((p: any) => ({
+         product: p,
+         score: calculateScore(p.name, stdOriginalText, phOriginalText, origWords)
+       })).filter((p: any) => p.score > 0);
+       
+       directMatches.sort((a: any, b: any) => b.score - a.score);
+       if (directMatches.length > 0 && directMatches[0].score >= 90) { 
+          matchProduct = directMatches[0].product;
+          activeQuantity = 1;
+       }
+    }
+
+    // Tier 2: matched with quantity stripped
+    if (!matchProduct && searchName) {
+       const stdSearchName = standardizeBn(searchName);
+       const phSearchName = toPhonetic(stdSearchName);
+       const searchWords = stdSearchName.split(/\s+/).filter((w: string) => w.length > 0);
+       
+       if (searchWords.length > 0) {
+         const parsedMatches = products.map((p: any) => ({
+           product: p,
+           score: calculateScore(p.name, stdSearchName, phSearchName, searchWords)
+         })).filter((p: any) => p.score > 0);
+         
+         parsedMatches.sort((a: any, b: any) => b.score - a.score);
+         if (parsedMatches.length > 0) {
+            matchProduct = parsedMatches[0].product;
+         }
+       }
+    }
+
+    if (matchProduct) {
+      if (matchProduct.stock !== null && matchProduct.stock < activeQuantity) {
+        setNotification({ type: 'error', message: `Insufficient stock for ${matchProduct.name}` });
+        return;
+      }
+      addToCart(matchProduct);
+      if (activeQuantity !== 1) {
+        setTimeout(() => {
+          updateCartQuantityManual(matchProduct.id, activeQuantity);
+        }, 300);
+      }
+      setNotification({ type: 'success', message: `${activeQuantity} ${matchProduct.unit || ''} ${matchProduct.name} added to cart via Voice` });
+    } else {
+      if (!matchFound && origWords.length >= 3) {
+         return;
+      }
+      setNotification({ type: 'error', message: `Product "${searchName || originalText}" not found` });
+    }
+  };
+
+  const { isListening, voiceFeedback, toggleVoiceSearch, startListening } = useVoiceSearch(handleVoiceCommand);
+
+  useEffect(() => {
+    // Try auto-starting when POS loads
+    startListening();
+  }, [startListening]);
+
   const filteredProducts = products.filter((p: Product) => 
-    p.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    p.barcode?.includes(searchTerm)
+    isPhoneticMatch(p.name, searchTerm) || 
+    (p.barcode && p.barcode.includes(searchTerm))
   );
 
   const filteredCustomers = customers.filter((c: Customer) => 
-    c.name?.toLowerCase().includes(customerSearch.toLowerCase()) ||
-    c.phone?.includes(customerSearch)
+    isPhoneticMatch(c.name, customerSearch) ||
+    (c.phone && c.phone.includes(customerSearch))
   );
 
   const selectedCustomer = customers.find((c: Customer) => c.id === checkoutData.customerId);
+  const [suggestionMode, setSuggestionMode] = useState<'none' | 'previous' | 'frequent'>('none');
+
+  const previouslyPurchasedProducts = useMemo(() => {
+    if (!checkoutData.customerId || !sales) return [];
+    
+    // get all sales for this customer
+    const customerSales = sales.filter((s: any) => s.customerId === checkoutData.customerId);
+    
+    // count product frequencies
+    const productCounts: Record<string, number> = {};
+    for (const sale of customerSales) {
+      if (!sale.items) continue;
+      for (const item of sale.items) {
+        productCounts[item.productId] = (productCounts[item.productId] || 0) + item.quantity;
+      }
+    }
+    
+    // sort by frequency and get top 5 products that are currently in stock
+    const sortedProductIds = Object.keys(productCounts).sort((a, b) => productCounts[b] - productCounts[a]);
+    return sortedProductIds
+      .map(id => products.find((p: Product) => p.id === id))
+      .filter((p: Product | undefined) => p !== undefined && p.stock > 0)
+      .slice(0, 5);
+  }, [sales, checkoutData.customerId, products]);
+
+  const frequentlyBoughtTogetherProducts = useMemo(() => {
+    if (!cart.length || !sales) return [];
+
+    const cartProductIds = cart.map((item: any) => item.id);
+    
+    // get sales that contain at least one item currently in the cart
+    const relatedSales = sales.filter((sale: any) => 
+      sale.items && sale.items.some((item: any) => cartProductIds.includes(item.productId))
+    );
+    
+    const productCounts: Record<string, number> = {};
+    for (const sale of relatedSales) {
+      if (!sale.items) continue;
+      for (const item of sale.items) {
+        // don't suggest items already in the cart
+        if (!cartProductIds.includes(item.productId)) {
+           productCounts[item.productId] = (productCounts[item.productId] || 0) + 1; // count co-occurrences
+        }
+      }
+    }
+    
+    const sortedProductIds = Object.keys(productCounts).sort((a, b) => productCounts[b] - productCounts[a]);
+    return sortedProductIds
+      .map(id => products.find((p: Product) => p.id === id))
+      .filter((p: Product | undefined) => p !== undefined && p.stock > 0)
+      .slice(0, 5);
+  }, [cart, sales, products]);
 
   return (
     <motion.div 
@@ -3127,17 +3910,38 @@ function POS({
       className="grid grid-cols-1 lg:grid-cols-3 gap-8 lg:h-[calc(100vh-8rem)]"
     >
       <div className="lg:col-span-2 flex flex-col space-y-4">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 relative">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
             <input 
               type="text"
               placeholder="Search products..."
-              className="w-full pl-10 pr-4 py-2 bg-white border border-gray-200 rounded-lg outline-none text-sm"
+              className="w-full pl-10 pr-12 py-2 bg-white border border-gray-200 rounded-lg outline-none text-sm"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
+            <button 
+              onClick={toggleVoiceSearch}
+              className={`absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-md transition-all ${isListening ? 'bg-red-500 text-white animate-pulse' : 'text-gray-400 hover:bg-gray-100 hover:text-indigo-600'}`}
+              title="Voice Commands (Bengali/English)"
+            >
+              {isListening ? <Mic className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+            </button>
           </div>
+
+          <AnimatePresence>
+            {voiceFeedback && (
+              <motion.div
+                initial={{ opacity: 0, y: -20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="absolute top-full left-0 mt-2 px-4 py-2 bg-indigo-600 text-white text-xs font-bold rounded-lg shadow-lg z-[9999] flex items-center gap-2"
+              >
+                <div className="w-2 h-2 bg-white rounded-full animate-ping" />
+                "{voiceFeedback}"
+              </motion.div>
+            )}
+          </AnimatePresence>
           <button 
               onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
               className="p-2 bg-white border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors"
@@ -3213,6 +4017,48 @@ function POS({
         </div>
 
         <div className="flex-1 lg:overflow-y-auto pb-4">
+          {(checkoutData.customerId && previouslyPurchasedProducts.length > 0) && (
+            <div className="mb-4">
+              <h3 className="text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider flex items-center gap-1"><History className="w-4 h-4" /> Previously Purchased</h3>
+              <div className="flex gap-2 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                {previouslyPurchasedProducts.map((product: Product) => (
+                   <button
+                   key={product.id}
+                   onClick={() => addToCart(product)}
+                   className="flex-none w-24 bg-indigo-50/50 p-2 rounded-lg border border-indigo-100 shadow-sm hover:border-indigo-500 hover:shadow-md transition-all text-left group"
+                 >
+                   <p className="font-bold text-gray-900 truncate text-[10px]">{product.name}</p>
+                   <p className="text-[9px] text-gray-500">Stock: {product.stock}</p>
+                   <div className="mt-1">
+                     <span className="text-indigo-600 font-bold text-xs">{formatCurrency(product.price)}</span>
+                   </div>
+                 </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {frequentlyBoughtTogetherProducts.length > 0 && (
+             <div className="mb-4">
+             <h3 className="text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider flex items-center gap-1"><Sparkles className="w-4 h-4 text-amber-500" /> Frequently Bought Together</h3>
+             <div className="flex gap-2 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+               {frequentlyBoughtTogetherProducts.map((product: Product) => (
+                  <button
+                  key={product.id}
+                  onClick={() => addToCart(product)}
+                  className="flex-none w-24 bg-amber-50/50 p-2 rounded-lg border border-amber-100 shadow-sm hover:border-amber-500 hover:shadow-md transition-all text-left group"
+                >
+                  <p className="font-bold text-gray-900 truncate text-[10px]">{product.name}</p>
+                  <p className="text-[9px] text-gray-500">Stock: {product.stock}</p>
+                  <div className="mt-1">
+                    <span className="text-amber-600 font-bold text-xs">{formatCurrency(product.price)}</span>
+                  </div>
+                </button>
+               ))}
+             </div>
+           </div>
+          )}
+
           {viewMode === 'grid' ? (
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
               {filteredProducts.map((product: Product) => (
@@ -3365,7 +4211,7 @@ function POS({
                 </div>
 
                 <div className="flex items-center justify-between gap-2">
-                  <div className="flex flex-col gap-1">
+                  <div className="flex flex-col gap-1 items-start">
                     <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-0.5">
                       <button onClick={() => updateCartQuantity(item.id, -1)} className="p-1.5 hover:bg-white rounded-lg shadow-sm transition-all"><Minus className="w-3 h-3" /></button>
                       <input 
@@ -3378,7 +4224,7 @@ function POS({
                       <button onClick={() => updateCartQuantity(item.id, 1)} className="p-1.5 hover:bg-white rounded-lg shadow-sm transition-all"><Plus className="w-3 h-3" /></button>
                     </div>
                     {item.unit === 'kg' && (
-                      <div className="flex gap-1">
+                      <div className="flex flex-wrap gap-1">
                         {[0.25, 0.5, 1, 2, 5].map(q => (
                           <button 
                             key={q}
@@ -3547,6 +4393,55 @@ function Inventory({ products, categories, stockRecords, onViewHistory, setNotif
   const [categorySearch, setCategorySearch] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
+  const handleVoiceCommand = (rawText: string) => {
+    let lower = rawText.toLowerCase().trim();
+    
+    // Check for "new product" triggers
+    if (lower.includes('নতুন প্রোডাক্ট') || lower.includes('নতুন ইনভেন্টরি') || lower.includes('new product') || lower.includes('প্রোডাক্ট অ্যাড')) {
+       // Optional: try to extract name, price, stock
+       const productPrefixes = ['নতুন প্রোডাক্ট', 'নতুন ইনভেন্টরি', 'new product', 'প্রোডাক্ট অ্যাড'];
+       let remainder = rawText;
+       for (const p of productPrefixes) {
+         if (lower.includes(p)) {
+           const idx = lower.indexOf(p);
+           remainder = rawText.substring(idx + p.length).trim();
+           break;
+         }
+       }
+       
+       const priceMatch = remainder.match(/(?:দাম|price)\s*(\d+(\.\d+)?)/i);
+       const stockMatch = remainder.match(/(?:স্টক|স্টোক|stock)\s*(\d+(\.\d+)?)/i);
+       
+       let nameEndIdx = remainder.length;
+       if (priceMatch && priceMatch.index !== undefined && priceMatch.index < nameEndIdx) nameEndIdx = priceMatch.index;
+       if (stockMatch && stockMatch.index !== undefined && stockMatch.index < nameEndIdx) nameEndIdx = stockMatch.index;
+       
+       const extractedName = remainder.substring(0, nameEndIdx).trim();
+
+       setIsModalOpen(true);
+       setEditingProduct({
+         name: extractedName,
+         price: priceMatch ? parseFloat(priceMatch[1]) : 0,
+         stock: stockMatch ? parseFloat(stockMatch[1]) : 0,
+         unit: 'unit',
+         cost: 0,
+         barcode: '',
+         category: 'General',
+         department: '',
+         location: '',
+         expiryDate: ''
+       });
+       setNotification({ type: 'success', message: 'Voice: Opened Add Product Modal with details' });
+       return;
+    }
+    
+    // Fallback: search products
+    setSearchTerm(rawText.trim());
+    setNotification({ type: 'info', message: `Voice searched for: ${rawText.trim()}` });
+  };
+
+  const { isListening, voiceFeedback, toggleVoiceSearch } = useVoiceSearch(handleVoiceCommand);
+
   // Clear confirmation state if user clicks elsewhere
   useEffect(() => {
     const handleClick = () => setConfirmDeleteId(null);
@@ -3559,10 +4454,10 @@ function Inventory({ products, categories, stockRecords, onViewHistory, setNotif
   );
 
   const filteredProducts = products.filter(p => 
-    p.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    p.barcode?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.serialNumber?.toString().includes(searchTerm) ||
-    p.category?.toLowerCase().includes(searchTerm.toLowerCase())
+    isPhoneticMatch(p.name, searchTerm) || 
+    (p.barcode && p.barcode.toLowerCase().includes(searchTerm.toLowerCase())) ||
+    (p.serialNumber && p.serialNumber.toString().includes(searchTerm)) ||
+    isPhoneticMatch(p.category, searchTerm)
   );
 
   useEffect(() => {
@@ -3758,12 +4653,16 @@ function Inventory({ products, categories, stockRecords, onViewHistory, setNotif
 
   const handleDelete = async (id: string) => {
     try {
+      const productToDelete = products.find(p => p.id === id);
+      if (productToDelete) {
+        await moveToRecycleBin('product', id, productToDelete);
+      }
       await deleteDoc(doc(db, 'products', id));
-      setNotification({ message: "Product deleted successfully", type: 'success' });
+      setNotification({ message: "Product moved to Recycle Bin", type: 'success' });
       setConfirmDeleteId(null);
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, 'products');
-      setNotification({ message: "Failed to delete product", type: 'error' });
+      setNotification({ message: "Failed to move product to Recycle Bin", type: 'error' });
     }
   };
 
@@ -3779,11 +4678,31 @@ function Inventory({ products, categories, stockRecords, onViewHistory, setNotif
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
           <input 
             type="text"
-            placeholder="Search products by name, barcode, SN or category..."
-            className="w-full pl-12 pr-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm"
+            placeholder="Search products or say 'New product [name] price [x] stock [y]'"
+            className="w-full pl-12 pr-12 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
+          <button 
+            onClick={toggleVoiceSearch}
+            className={`absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-full transition-all flex items-center justify-center ${isListening ? 'bg-indigo-600 text-white shadow-lg animate-pulse shadow-indigo-200' : 'text-gray-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
+          >
+            {isListening ? <Mic className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+          </button>
+          
+          <AnimatePresence>
+            {voiceFeedback && (
+              <motion.div
+                initial={{ opacity: 0, y: -20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="absolute top-full left-0 mt-2 px-4 py-2 bg-indigo-600 text-white text-xs font-bold rounded-lg shadow-lg z-50 flex items-center gap-2"
+              >
+                <div className="w-2 h-2 bg-white rounded-full animate-ping" />
+                "{voiceFeedback}"
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
@@ -4410,7 +5329,11 @@ function Accounting({
   customers,
   onAddExpense,
   onAddInvestment,
-  onAddSalary
+  onAddSalary,
+  onDeleteExpense,
+  onDeleteInvestment,
+  onDeleteSalary,
+  onSendWhatsAppReminder
 }: { 
   sales: Sale[], 
   products: Product[], 
@@ -4420,7 +5343,11 @@ function Accounting({
   customers: Customer[],
   onAddExpense: (e: Omit<Expense, 'id'>) => void,
   onAddInvestment: (i: Omit<Investment, 'id'>) => void,
-  onAddSalary: (s: Omit<StaffSalary, 'id'>) => void
+  onAddSalary: (s: Omit<StaffSalary, 'id'>) => void,
+  onDeleteExpense: (e: Expense) => void,
+  onDeleteInvestment: (i: Investment) => void,
+  onDeleteSalary: (s: StaffSalary) => void,
+  onSendWhatsAppReminder: (customer: Customer, lang: 'en' | 'bn') => void
 }) {
   const [activeTab, setActiveTab] = useState<'overview' | 'expenses' | 'investments' | 'salaries' | 'dues'>('overview');
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
@@ -4483,12 +5410,6 @@ function Accounting({
       timestamp: new Date()
     });
     setIsSalaryModalOpen(false);
-  };
-
-  const sendWhatsAppReminder = (customer: Customer) => {
-    const message = `Assalamu Alaikum ${customer.name}, this is a reminder regarding your outstanding due of TK ${customer.currentDue?.toFixed(2)}. ${customer.dueDate ? `Your promised date was ${customer.dueDate}.` : ''} Please settle the amount as soon as possible. Thank you!`;
-    const cleanPhone = customer.phone.replace(/\D/g, '');
-    window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
   return (
@@ -4589,6 +5510,7 @@ function Accounting({
                 <th className="px-6 py-4 text-sm font-semibold text-gray-600">Category</th>
                 <th className="px-6 py-4 text-sm font-semibold text-gray-600">Description</th>
                 <th className="px-6 py-4 text-sm font-semibold text-gray-600 text-right">Amount</th>
+                <th className="px-6 py-4 text-sm font-semibold text-gray-600 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -4602,6 +5524,14 @@ function Accounting({
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-600">{exp.description}</td>
                   <td className="px-6 py-4 text-sm font-bold text-gray-900 text-right">TK {exp.amount.toLocaleString()}</td>
+                  <td className="px-6 py-4 text-right">
+                    <button 
+                      onClick={() => {if(confirm('Delete expense?')) onDeleteExpense(exp)}}
+                      className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -4615,6 +5545,7 @@ function Accounting({
                 <th className="px-6 py-4 text-sm font-semibold text-gray-600">Date</th>
                 <th className="px-6 py-4 text-sm font-semibold text-gray-600">Description</th>
                 <th className="px-6 py-4 text-sm font-semibold text-gray-600 text-right">Amount</th>
+                <th className="px-6 py-4 text-sm font-semibold text-gray-600 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -4623,6 +5554,14 @@ function Accounting({
                   <td className="px-6 py-4 text-sm text-gray-600">{format(safeDate(inv.timestamp), 'dd MMM yyyy')}</td>
                   <td className="px-6 py-4 text-sm text-gray-600">{inv.description}</td>
                   <td className="px-6 py-4 text-sm font-bold text-emerald-600 text-right">TK {inv.amount.toLocaleString()}</td>
+                  <td className="px-6 py-4 text-right">
+                    <button 
+                      onClick={() => {if(confirm('Delete investment?')) onDeleteInvestment(inv)}}
+                      className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -4637,6 +5576,7 @@ function Accounting({
                 <th className="px-6 py-4 text-sm font-semibold text-gray-600">Staff Name</th>
                 <th className="px-6 py-4 text-sm font-semibold text-gray-600">Month</th>
                 <th className="px-6 py-4 text-sm font-semibold text-gray-600 text-right">Amount</th>
+                <th className="px-6 py-4 text-sm font-semibold text-gray-600 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -4646,6 +5586,14 @@ function Accounting({
                   <td className="px-6 py-4 text-sm font-bold text-gray-900">{sal.staffName}</td>
                   <td className="px-6 py-4 text-sm text-gray-600">{sal.month}</td>
                   <td className="px-6 py-4 text-sm font-bold text-indigo-600 text-right">TK {sal.amount.toLocaleString()}</td>
+                  <td className="px-6 py-4 text-right">
+                    <button 
+                      onClick={() => {if(confirm('Delete salary record?')) onDeleteSalary(sal)}}
+                      className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -4703,14 +5651,14 @@ function Accounting({
                   )}
                   <div className="flex gap-2 w-full">
                     <button 
-                      onClick={() => sendWhatsAppReminder(customer)}
+                      onClick={() => onSendWhatsAppReminder(customer, 'en')}
                       className="flex-1 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1 hover:bg-emerald-700 transition-all"
                     >
                       <MessageCircle className="w-3 h-3" />
                       Remind (En)
                     </button>
                     <button 
-                      onClick={() => sendWhatsAppReminder(customer)}
+                      onClick={() => onSendWhatsAppReminder(customer, 'bn')}
                       className="flex-1 py-2 bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1 hover:bg-emerald-800 transition-all"
                     >
                       <MessageCircle className="w-3 h-3" />
@@ -4883,12 +5831,16 @@ function Customers({ customers, sales, setNotification, shopSettings }: {
 
   const handleDelete = async (id: string) => {
     try {
+      const customerToDelete = customers.find(c => c.id === id);
+      if (customerToDelete) {
+        await moveToRecycleBin('customer', id, customerToDelete);
+      }
       await deleteDoc(doc(db, 'customers', id));
-      setNotification({ message: "Customer deleted successfully", type: 'success' });
+      setNotification({ message: "Customer moved to Recycle Bin", type: 'success' });
       setConfirmDeleteId(null);
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, 'customers');
-      setNotification({ message: "Failed to delete customer", type: 'error' });
+      setNotification({ message: "Failed to move customer to Recycle Bin", type: 'error' });
     }
   };
 
@@ -5185,8 +6137,9 @@ function Customers({ customers, sales, setNotification, shopSettings }: {
   );
 }
 
-function DailyClosingView({ sales, expenses, dailyClosings, settings }: { sales: Sale[], expenses: Expense[], dailyClosings: DailyClosing[], settings: ShopSettings }) {
+function DailyClosingView({ sales, expenses, dailyClosings, settings, user, onDelete }: { sales: Sale[], expenses: Expense[], dailyClosings: DailyClosing[], settings: ShopSettings, user?: any, onDelete: (closing: DailyClosing) => void }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [closingToDelete, setClosingToDelete] = useState<DailyClosing | null>(null);
   const today = format(new Date(), 'yyyy-MM-dd');
 
   // Find the last closing timestamp to define the current session
@@ -5315,11 +6268,18 @@ function DailyClosingView({ sales, expenses, dailyClosings, settings }: { sales:
                     <div className="flex items-center gap-2">
                       <span className="px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full text-xs font-bold">CLOSED</span>
                       <button 
-                        onClick={() => printDailyClosing(closing, settings)}
+                        onClick={() => printDailyClosing(closing, settings, user)}
                         className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
                         title="Print Report"
                       >
                         <Printer className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={() => setClosingToDelete(closing)}
+                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                        title="Delete (Move to Bin)"
+                      >
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </td>
@@ -5329,6 +6289,42 @@ function DailyClosingView({ sales, expenses, dailyClosings, settings }: { sales:
           </table>
         </div>
       </div>
+
+      <AnimatePresence>
+        {closingToDelete && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }} 
+              animate={{ scale: 1, opacity: 1 }} 
+              exit={{ scale: 0.9, opacity: 0 }} 
+              className="bg-white p-8 rounded-3xl shadow-2xl max-w-sm w-full text-center"
+            >
+              <div className="w-16 h-16 bg-red-50 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                <Trash2 className="w-8 h-8" />
+              </div>
+              <h3 className="text-xl font-bold mb-2">Delete Daily Closing?</h3>
+              <p className="text-gray-500 mb-8">This will move the closing for {format(new Date(closingToDelete.date), 'dd MMM yyyy')} to the Recycle Bin.</p>
+              <div className="flex gap-4">
+                <button 
+                  onClick={() => setClosingToDelete(null)}
+                  className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-xl font-bold hover:bg-gray-200 transition-all"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={() => {
+                    onDelete(closingToDelete);
+                    setClosingToDelete(null);
+                  }}
+                  className="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-all"
+                >
+                  Delete
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {isModalOpen && (

@@ -1,0 +1,151 @@
+440:const printDailyClosing = (closing: DailyClosing, settings: ShopSettings) => {
+441-  const lang = settings.printLanguage || 'bn';
+442-  const t = PRINT_TRANSLATIONS[lang];
+443-  const printWindow = window.open('', '_blank');
+444-  if (!printWindow) return;
+445-
+446-  const formatVal = (num: number) => lang === 'bn' ? toBengaliNumber((num || 0).toFixed(2)) : (num || 0).toFixed(2);
+447-  const formatDate = (dateStr: string) => lang === 'bn' ? toBengaliNumber(dateStr) : dateStr;
+448-  const formatDateTime = (date: Date) => lang === 'bn' ? toBengaliNumber(format(date, 'dd/MM/yyyy hh:mm a')) : format(date, 'dd/MM/yyyy hh:mm a');
+449-  
+450-  const expectedCash = (closing.cashSales || 0) + (closing.collections || 0) - (closing.totalExpenses || 0);
+451-  const discrepancy = (closing.cashInHand || 0) - expectedCash;
+452-
+453-  const denominationsHtml = Object.entries(closing.denominations)
+454-    .filter(([_, count]) => count > 0)
+455-    .sort((a, b) => parseInt(b[0]) - parseInt(a[0]))
+456-    .map(([val, count]) => `
+457-      <div style="display: flex; justify-content: space-between; font-size: 11px; padding: 2px 0; border-bottom: 0.5px solid #eee;">
+458-        <span>${lang === 'bn' ? toBengaliNumber(val) : val} x ${lang === 'bn' ? toBengaliNumber(count) : count}</span>
+459-        <span style="font-weight: 700;">= ${formatVal(parseInt(val) * count)}</span>
+460-      </div>
+461-    `).join('');
+462-
+463-  printWindow.document.write(`
+464-    <!DOCTYPE html>
+465-    <html>
+466-      <head>
+467-        <title>${t.dailyReport} - ${closing.date}</title>
+468-        <style>
+469-          @import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Inter:wght@400;600;700&display=swap');
+470-          * { margin: 0; padding: 0; box-sizing: border-box; }
+471-          body { 
+472-            font-family: ${lang === 'bn' ? "'Hind Siliguri', sans-serif" : "'Inter', sans-serif"};
+473-            width: ${settings.receiptWidth || '58mm'};
+474-            max-width: 100%;
+475-            margin: 0 auto; 
+476-            padding: 2mm 0; 
+477-            font-size: 11px; 
+478-            line-height: 1.2;
+479-            color: #000;
+480-          }
+481-          .header { text-align: center; margin-bottom: 6px; border-bottom: 1.5px solid #000; padding-bottom: 4px; }
+482-          .shop-name { font-size: 18px; font-weight: 800; text-transform: uppercase; margin-bottom: 1px; }
+483-          .shop-info { font-size: 12px; margin-bottom: 0px; color: #111; font-weight: 500; }
+484-          .report-title { font-size: 11px; font-weight: 700; background: #000; color: #fff !important; display: inline-block; padding: 2px 8px; margin-top: 4px; border-radius: 3px; }
+485-          
+486-          .section { margin-bottom: 6px; page-break-inside: avoid; }
+487-          .section-title { font-weight: 800; border-bottom: 1.5px solid #000; margin-bottom: 3px; font-size: 11px; text-transform: uppercase; display: flex; justify-content: space-between; padding-bottom: 2px; }
+488-          
+489-          .row { display: flex; justify-content: space-between; margin-bottom: 2px; padding-bottom: 2px; border-bottom: 1px solid #eee; }
+490-          .row.bold { font-weight: 700; font-size: 11px; border-bottom: 1px solid #000; }
+491-          .row.highlight { background: #f8f8f8; padding: 2px; }
+492-          
+493-          .grand-total { font-size: 14px; font-weight: 800; border-top: 1.5px solid #000; border-bottom: 1.5px solid #000; padding: 4px 0; margin-top: 4px; }
+494-          
+495-          .footer { text-align: center; margin-top: 10px; font-size: 11px; border-top: 1px dashed #000; padding-top: 6px; page-break-inside: avoid; }
+496-          .cash-table { width: 100%; margin-top: 4px; border: 1px solid #000; padding: 4px; }
+497-          
+498-          @media print {
+499-            @page { margin: 0; }
+500-            body { width: 100%; padding: 4mm 2mm; margin: 0; }
+501-            html, body {
+502-               height: auto;
+503-            }
+504-          }
+505-        </style>
+506-      </head>
+507-      <body>
+508-        <div class="header">
+509-          <div class="shop-name">${settings.name}</div>
+510-          <div class="shop-info">${settings.address}</div>
+511-          <div class="report-title">${t.dailyReport}</div>
+512-          <div style="margin-top: 4px; font-weight: 700;">${t.date}: ${formatDate(closing.date)}</div>
+513-        </div>
+514-
+515-        <div class="section">
+516-          <div class="section-title"><span>${lang === 'bn' ? 'বিক্রয় ও সংগ্রহ' : 'Sales & Collection'}</span></div>
+517-          <div class="row"><span>${t.totalSales}:</span> <span>${formatVal(closing.totalSales)}</span></div>
+518-          <div class="row"><span>${t.cashSales}:</span> <span>${formatVal(closing.cashSales)}</span></div>
+519-          <div class="row"><span>${t.dueSales}:</span> <span>${formatVal(closing.dueSales)}</span></div>
+520-          <div class="row"><span>${t.collection}:</span> <span>${formatVal(closing.collections)}</span></div>
+521-          <div class="row bold highlight" style="margin-top: 10px;">
+522-            <span>${t.totalCashReceived}:</span> <span>${formatVal((closing.cashSales || 0) + (closing.collections || 0))}</span>
+523-          </div>
+524-        </div>
+525-
+526-        <div class="section">
+527-          <div class="section-title"><span>${t.expenses}</span></div>
+528-          <div class="row" style="color: #d32f2f; font-weight: 700;">
+529-            <span>${t.expenses}:</span> <span>- ${formatVal(closing.totalExpenses)}</span>
+530-          </div>
+531-        </div>
+532-
+533-        <div class="section">
+534-          <div class="section-title"><span>${t.closingSummary}</span></div>
+535-          <div class="row"><span>${t.expectedCash}:</span> <span>${formatVal(expectedCash)}</span></div>
+536-          <div class="row bold grand-total">
+537-            <span>${t.actualCash}:</span> <span>${formatVal(closing.cashInHand)}</span>
+538-          </div>
+539-          <div style="text-align: right; font-weight: 800; font-size: 11px; margin-top: 5px; color: ${discrepancy >= 0 ? '#2e7d32' : '#d32f2f'}">
+540-            ${discrepancy === 0 ? t.discrepancyMatch : discrepancy > 0 ? `${t.discrepancyPlus}: ${formatVal(discrepancy)}` : `${t.discrepancyMinus}: ${formatVal(discrepancy)}`}
+541-          </div>
+542-          
+543-          <div class="cash-table">
+544-            <div style="font-weight: 800; border-bottom: 2px solid #000; margin-bottom: 6px; padding-bottom: 3px; font-size: 11px;">${t.noteDetails}:</div>
+545-            ${denominationsHtml || `<div style="text-align: center; padding: 10px; color: #666;">${t.noNotes}</div>`}
+546-          </div>
+547-        </div>
+548-
+549-        <div class="section">
+550-          <div class="section-title"><span>${t.digitalBalance}</span></div>
+551-          <div class="row"><span>${t.bkash}:</span> <span>${formatVal(closing.bkashBalance)}</span></div>
+552-        </div>
+553-
+554-        ${closing.notes ? `
+555-          <div class="section">
+556-            <div class="section-title"><span>${t.additionalNotes}</span></div>
+557-            <div style="font-size: 11px; white-space: pre-wrap; padding: 10px; border: 1px solid #000; background: #fafafa;">${closing.notes}</div>
+558-          </div>
+559-        ` : ''}
+560-
+561-        <div class="footer">
+562-          ${t.printedAt}: ${formatDateTime(new Date())}<br>
+563-          <div style="margin-top: 6px; font-weight: 800; font-size: 11px; text-transform: uppercase;">${settings.name}</div>
+564-        </div>
+565-        <script>
+566-          window.onload = () => {
+567-            window.print();
+568-            setTimeout(() => window.close(), 1500);
+569-          };
+570-        </script>
+571-      </body>
+572-    </html>
+573-  `);
+574-  printWindow.document.close();
+575-};
+576-
+577-const printInvoice = (sale: Sale, settings: ShopSettings) => {
+578-  const lang = settings.printLanguage || 'bn';
+579-  const t = PRINT_TRANSLATIONS[lang];
+580-  const printWindow = window.open('', '_blank');
+581-  if (!printWindow) return;
+582-
+583-  const formatVal = (num: number) => lang === 'bn' ? toBengaliNumber((num || 0).toFixed(2)) : (num || 0).toFixed(2);
+584-  const formatDate = (date: Date) => lang === 'bn' ? toBengaliNumber(format(date, 'dd/MM/yy')) : format(date, 'dd/MM/yy');
+585-  const formatTime = (date: Date) => lang === 'bn' ? toBengaliNumber(format(date, 'HH:mm')) : format(date, 'HH:mm');
+586-
+587-  const itemsHtml = sale.items.map(item => {
+588-    let qSuffix = '';
+589-    if (item.unit === 'unit') {
+590-      qSuffix = lang === 'bn' ? ' পিস' : ' p';

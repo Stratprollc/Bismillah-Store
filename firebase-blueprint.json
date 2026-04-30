@@ -155,6 +155,21 @@
         "note": { "type": "string" }
       },
       "required": ["productId", "quantity", "type", "timestamp"]
+    },
+    "RecycleItem": {
+      "title": "RecycleItem",
+      "description": "An item moved to the recycle bin",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "entityType": { "type": "string", "enum": ["product", "sale", "customer", "expense", "stockRecord", "employee", "investment", "salary"] },
+        "originalId": { "type": "string" },
+        "data": { "type": "object" },
+        "deletedAt": { "type": "string", "format": "date-time" },
+        "deletedBy": { "type": "string" },
+        "expiresAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["entityType", "originalId", "data", "deletedAt", "expiresAt"]
     }
   },
   "firestore": {
@@ -197,6 +212,10 @@
     "/stockRecords/{recordId}": {
       "schema": "StockRecord",
       "description": "Collection of stock movement records"
+    },
+    "/recycleBin/{itemId}": {
+      "schema": "RecycleItem",
+      "description": "Collection of deleted items in bin"
     }
   }
 }

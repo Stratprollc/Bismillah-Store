@@ -1,0 +1,171 @@
+575:const printInvoice = (sale: Sale, settings: ShopSettings) => {
+576-  const lang = settings.printLanguage || 'bn';
+577-  const t = PRINT_TRANSLATIONS[lang];
+578-  const printWindow = window.open('', '_blank');
+579-  if (!printWindow) return;
+580-
+581-  const formatVal = (num: number) => lang === 'bn' ? toBengaliNumber((num || 0).toFixed(2)) : (num || 0).toFixed(2);
+582-  const formatDate = (date: Date) => lang === 'bn' ? toBengaliNumber(format(date, 'dd/MM/yy')) : format(date, 'dd/MM/yy');
+583-  const formatTime = (date: Date) => lang === 'bn' ? toBengaliNumber(format(date, 'HH:mm')) : format(date, 'HH:mm');
+584-
+585-  const itemsHtml = sale.items.map(item => {
+586-    let qSuffix = '';
+587-    if (item.unit === 'unit') {
+588-      qSuffix = lang === 'bn' ? ' পিস' : ' p';
+589-    } else if (item.unit === 'kg') {
+590-      if (item.quantity >= 1) {
+591-        qSuffix = lang === 'bn' ? ' কেজি' : ' K';
+592-      } else {
+593-        qSuffix = lang === 'bn' ? ' গ্রাম' : ' g';
+594-      }
+595-    }
+596-    
+597-    return `
+598-    <tr>
+599-      <td style="padding: 2px 0; vertical-align: top;">
+600-        <div style="font-weight: 500; font-size: 11px;">${item.productName}</div>
+601-      </td>
+602-      <td style="padding: 2px 0; text-align: center; vertical-align: top; font-size: 11px;">
+603-        ${lang === 'bn' ? toBengaliNumber(item.quantity.toString()) : item.quantity}${qSuffix}
+604-      </td>
+605-      <td style="padding: 2px 0; text-align: right; vertical-align: top; font-size: 11px;">
+606-        ${formatVal(item.price)}
+607-      </td>
+608-      <td style="padding: 2px 0; text-align: right; vertical-align: top; font-size: 11px; font-weight: 600;">
+609-        ${formatVal(item.price * item.quantity)}
+610-      </td>
+611-    </tr>`;
+612-  }).join('');
+613-
+614-  const width = settings.receiptWidth || '58mm';
+615-  const changeAmount = Math.max(0, (sale.paidAmount || 0) - (sale.finalAmount || 0));
+616-  const previousBalance = sale.previousBalance || 0;
+617-
+618-  const html = `<!DOCTYPE html>
+619-    <html>
+620-      <head>
+621-        <title>${t.invoice} #${sale.id}</title>
+622-        <style>
+623-          @import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Inter:wght@400;600;700&display=swap');
+624-          * { margin: 0; padding: 0; box-sizing: border-box; }
+625-          body { 
+626-            font-family: ${lang === 'bn' ? "'Hind Siliguri', sans-serif" : "'Inter', sans-serif"};
+627-            width: ${width}; 
+628-            max-width: 100%;
+629-            margin: 0 auto; 
+630-            padding: 2mm; 
+631-            font-size: 11px; 
+632-            line-height: 1.2;
+633-            color: #000;
+634-          }
+635-          .header { text-align: center; margin-bottom: 6px; }
+636-          .logo { max-width: 25mm; max-height: 15mm; margin: 0 auto 3px auto; display: block; }
+637-          .shop-name { font-size: 16px; font-weight: 700; margin-bottom: 1px; }
+638-          .shop-info { font-size: 10px; margin-bottom: 1px; color: #111; }
+639-          
+640-          .divider { border-bottom: 1px solid #000; margin: 4px 0; }
+641-          .dashed-divider { border-bottom: 1px dashed #000; margin: 6px 0; }
+642-          
+643-          .meta-grid { display: flex; justify-content: space-between; font-size: 10px; margin: 3px 0; }
+644-          .meta-left { display: flex; flex-direction: column; gap: 1px; }
+645-          .meta-right { text-align: right; }
+646-          
+647-          table { width: 100%; border-collapse: collapse; margin-top: 2px; margin-bottom: 2px; }
+648-          th { font-size: 10px; text-align: left; padding: 2px 0; font-weight: 700; color: #000; border-bottom: 1px solid #000;}
+649-          td { padding: 2px 0; border-bottom: 0.5px solid #eee; }
+650-          
+651-          .totals { font-size: 11px; margin-top: 4px; page-break-inside: avoid; }
+652-          .total-row { display: flex; justify-content: space-between; margin: 2px 0; font-weight: 500; }
+653-          .grand-total { display: flex; justify-content: space-between; font-weight: 700; font-size: 14px; margin: 3px 0; }
+654-          
+655-          .due-amount { text-align: center; font-weight: 700; font-size: 12px; margin: 6px 0; }
+656-          
+657-          .footer { text-align: center; font-size: 9px; line-height: 1.2; color: #000; font-weight: 400; margin-top: 8px; page-break-inside: avoid; }
+658-          
+659-          @media print {
+660-            body { width: 100%; padding: 0; margin: 0; }
+661-            html, body {
+662-               height: auto;
+663-            }
+664-          }
+665-        </style>
+666-      </head>
+667-      <body>
+668-        <div class="header">
+669-          ${settings.logoBase64 ? `<img src="${settings.logoBase64}" class="logo" />` : ''}
+670-          <div class="shop-name">${settings.name}</div>
+671-          <div class="shop-info">${settings.address}</div>
+672-          ${settings.phone ? `<div class="shop-info">${t.mobile}: ${lang === 'bn' ? toBengaliNumber(settings.phone) : settings.phone}</div>` : ''}
+673-        </div>
+674-
+675-        <div class="divider"></div>
+676-
+677-        <div class="meta-grid">
+678-          <div class="meta-left">
+679-            <span><strong>${t.invoiceId}:</strong> #${lang === 'bn' ? toBengaliNumber(sale.id) : sale.id}</span>
+680-            <span><strong>${t.customer}:</strong> ${sale.customerName || t.retailSale}${sale.customerPhone ? `<br><strong>${t.phone}:</strong> ${lang === 'bn' ? toBengaliNumber(sale.customerPhone) : sale.customerPhone}` : ''}</span>
+681-          </div>
+682-          <div class="meta-right">
+683-            <span>${formatDate(safeDate(sale.timestamp))} ${formatTime(safeDate(sale.timestamp))}</span>
+684-          </div>
+685-        </div>
+686-
+687-        <div class="divider"></div>
+688-
+689-        <table>
+690-          <thead>
+691-            <tr>
+692-              <th style="width: 50%;">${t.item}</th>
+693-              <th style="width: 15%; text-align: center;">${t.qty}</th>
+694-              <th style="width: 15%; text-align: right;">${t.price}</th>
+695-              <th style="width: 20%; text-align: right;">${t.amount}</th>
+696-            </tr>
+697-          </thead>
+698-          <tbody>
+699-            <tr><td colspan="4" style="padding: 0;"><div class="divider" style="margin: 0;"></div></td></tr>
+700-            ${itemsHtml}
+701-          </tbody>
+702-        </table>
+703-
+704-        <div class="divider"></div>
+705-
+706-        <div class="totals">
+707-          <div class="total-row">
+708-            <span>${t.subtotal}:</span>
+709-            <span>${formatVal(sale.totalAmount)}</span>
+710-          </div>
+711-          
+712-          ${sale.discount > 0 ? `
+713-          <div class="total-row">
+714-            <span>${t.discount}:</span>
+715-            <span>- ${formatVal(sale.discount)}</span>
+716-          </div>
+717-          ` : ''}
+718-          
+719-          <div class="divider"></div>
+720-          
+721-          <div class="grand-total">
+722-            <span>${t.grandTotal}:</span>
+723-            <span>${formatVal(sale.finalAmount)}</span>
+724-          </div>
+725-          
+726-          <div class="divider"></div>
+727-          
+728-          <div class="total-row">
+729-            <span>${t.paid}:</span>
+730-            <span>${formatVal(sale.paidAmount)}</span>
+731-          </div>
+732-          
+733-          <div class="divider"></div>
+734-        </div>
+735-
+736-        <div class="due-amount">
+737-          ${t.due}: ${formatVal(sale.finalAmount - (sale.paidAmount || 0))}
+738-        </div>
+739-        
+740-        ${sale.customerId ? `
+741-        <div class="dashed-divider"></div>
+742-        <div style="font-size: 10px; font-weight: 500; margin-top: 4px;">
+743-          <div style="text-align: center; font-weight: 700; margin-bottom: 2px;">${t.balanceSummary}</div>
+744-          <div style="display: flex; justify-content: space-between;"><span>${t.prevBalance}:</span> <span>${formatVal(previousBalance)}</span></div>
+745-          <div style="display: flex; justify-content: space-between;"><span>${t.todayBill}:</span> <span>${formatVal(sale.finalAmount)}</span></div>
