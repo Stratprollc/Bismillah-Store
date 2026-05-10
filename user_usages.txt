@@ -1,0 +1,33 @@
+2647:      if (!user || !user.shopId) throw new Error("User not authenticated");
+2651:      const shopRef = doc(db, 'shops', user.shopId);
+2654:        shopId: user.shopId,
+2655:        ownerEmail: user.email,
+2656:        ownerUid: user.uid,
+2661:      const settingsRef = doc(db, 'settings', user.shopId);
+2664:        shopId: user.shopId,
+2775:    if (!user || user.role !== 'admin') return;
+2814:    if (!user || !user.shopId) {
+2834:    const currentShopId = user.shopId;
+2926:      if (!user || !user.shopId) return;
+2930:        shopId: user.shopId,
+3188:        shopId: user.shopId,
+3260:            shopId: user.shopId,
+3487:    if (!user || !user.shopId) return;
+3488:    await addDoc(collection(db, 'categories'), { name, shopId: user.shopId });
+3500:      if (!user || !user.shopId) throw new Error("No shopId found");
+3503:      const shopRef = doc(db, 'shops', user.shopId);
+3515:      await setDoc(doc(db, 'settings', user.shopId), { ...newSettings, shopId: user.shopId });
+3535:      await addDoc(collection(db, 'users'), { ...newUser, shopId: user.shopId });
+3557:      await addDoc(collection(db, 'employees'), { ...newEmployee, shopId: user.shopId });
+3568:        shopId: user.shopId,
+3602:      await addDoc(collection(db, 'expenses'), { ...newExpense, shopId: user.shopId });
+3611:      await addDoc(collection(db, 'investments'), { ...newInvestment, shopId: user.shopId });
+3620:      await addDoc(collection(db, 'staff_salaries'), { ...newSalary, shopId: user.shopId });
+3975:                {group.items.filter(item => (user && item.roles.includes(user.role)) || (item.id === 'shops' && isMasterAdmin)).map((item, idx) => (
+4016:                {user.email?.[0].toUpperCase() || 'A'}
+4019:                <p className="text-[13px] font-bold text-gray-900 truncate leading-tight">{user.email?.split('@')[0] || 'Administrator'}</p>
+4020:                <p className="text-[10px] font-bold text-indigo-500 truncate uppercase mt-0.5 tracking-wider">{user.role}</p>
+8785:          shopId: user.shopId,
+8813:          shopId: user.shopId,
+11156:          shopId: user.shopId,
+11168:          shopId: user.shopId,

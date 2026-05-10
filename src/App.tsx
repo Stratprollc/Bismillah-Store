@@ -93,7 +93,8 @@ import {
   Tag,
   Factory,
   Database as DatabaseIcon,
-  PhoneCall
+  PhoneCall,
+  Loader2
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -420,6 +421,35 @@ const SYSTEM_TRANSLATIONS = {
     googleSignIn: 'Sign in with Google',
     loginTitle: 'Business Management Suite',
     loginSubtitle: 'Secure access to your store operations',
+    core: 'Core',
+    inventory_group: 'Inventory',
+    sales_crm: 'Sales & CRM',
+    accounting: 'Accounting',
+    management: 'Management',
+    master_console: 'Master Console',
+    stockInventory: 'Stock Inventory',
+    products: 'Products',
+    liveStock: 'Live Stock',
+    sortSerial: 'Sort: Serial No.',
+    sortName: 'Sort: Name',
+    sortCompany: 'Sort: Company',
+    sortNearExpire: 'Sort: Near Expire',
+    showExpiredOnly: 'Show: Expired Only',
+    sortPrice: 'Sort: Price',
+    sortStock: 'Sort: Stock',
+    sortLongTimeNoSell: 'Sort: Long Time No Sell',
+    sortTrending: 'Sort: Trending',
+    ascending: 'Ascending (A-Z)',
+    descending: 'Descending (Z-A)',
+    addProduct: 'Add Product',
+    updateProduct: 'Update Product',
+    uploadCSV: 'Upload CSV',
+    downloadCSV: 'Download CSV',
+    voiceSearch: 'Voice Search',
+    expiryAlerts: 'Expiry Alerts',
+    expiryAlertsDesc: 'The following products are nearing their expiry date (within 30 days).',
+    businessSnapshot: 'Business Snapshot',
+    totalExpenses: 'Total Expenses',
   },
   bn: {
 
@@ -488,6 +518,35 @@ const SYSTEM_TRANSLATIONS = {
     googleSignIn: 'গুগল দিয়ে লগইন',
     loginTitle: 'বিজনেস ম্যানেজমেন্ট স্যুট',
     loginSubtitle: 'আপনার দোকানের কার্যক্রম সুরক্ষিতভাবে পরিচালনা করুন',
+    core: 'মূল মেনু',
+    inventory_group: 'ইনভেন্টরি',
+    sales_crm: 'বিক্রয় ও সিআরএম',
+    accounting: 'হিসাববিজ্ঞান',
+    management: 'ব্যবস্থাপনা',
+    master_console: 'মাস্টার কনসোল',
+    stockInventory: 'স্টক ইনভেন্টরি',
+    products: 'পণ্যসমূহ',
+    liveStock: 'মোট স্টক',
+    sortSerial: 'সিরিয়াল নম্বর অনুযায়ী',
+    sortName: 'নাম অনুযায়ী',
+    sortCompany: 'কোম্পানি অনুযায়ী',
+    sortNearExpire: 'মেয়াদ উত্তীর্ণ আসন্ন',
+    showExpiredOnly: 'শুধুমাত্র মেয়াদ উত্তীর্ণ',
+    sortPrice: 'মূল্য অনুযায়ী',
+    sortStock: 'স্টক অনুযায়ী',
+    sortLongTimeNoSell: 'অনেকদিন বিক্রি হয়নি',
+    sortTrending: 'ট্রেন্ডিং পণ্য',
+    ascending: 'ছোট থেকে বড় (A-Z)',
+    descending: 'বড় থেকে ছোট (Z-A)',
+    addProduct: 'নতুন পণ্য যোগ করুন',
+    updateProduct: 'পণ্য আপডেট করুন',
+    uploadCSV: 'সিএসভি আপলোড',
+    downloadCSV: 'সিএসভি ডাউনলোড',
+    voiceSearch: 'ভয়েস সার্চ',
+    expiryAlerts: 'মেয়াদ উত্তীর্ণের সতর্কবার্তা',
+    expiryAlertsDesc: 'নিচের পণ্যগুলোর মেয়াদের তারিখ সন্নিকটে (৩০ দিনের মধ্যে)',
+    businessSnapshot: 'আপনার ব্যবসার সংক্ষিপ্ত চিত্র',
+    totalExpenses: 'মোট খরচ',
   },
   ar: {
     dashboard: 'لوحة القيادة',
@@ -546,7 +605,36 @@ const SYSTEM_TRANSLATIONS = {
     actions: 'الإجراءات',
     cashReceived: 'النقد المستلم',
     retailSale: 'مبيعات التجزئة',
-    expenses: 'المصاريف'
+    expenses: 'المصاريف',
+    core: 'الأساسية',
+    inventory_group: 'المخزون',
+    sales_crm: 'المبيعات وعلاقات العملاء',
+    accounting: 'المحاسبة',
+    management: 'الإدارة',
+    master_console: 'لوحة التحكم الرئيسية',
+    stockInventory: 'مخزون المنتجات',
+    products: 'منتجات',
+    liveStock: 'المخزون الحالي',
+    sortSerial: 'الترتيب: الرقم التسلسلي',
+    sortName: 'الترتيب: الاسم',
+    sortCompany: 'الترتيب: الشركة',
+    sortNearExpire: 'الترتيب: قرب انتهاء الصلاحية',
+    showExpiredOnly: 'عرض: المنتهي الصلاحية فقط',
+    sortPrice: 'الترتيب: السعر',
+    sortStock: 'الترتيب: المخزون',
+    sortLongTimeNoSell: 'الترتيب: لم يباع منذ فترة',
+    sortTrending: 'الترتيب: الأكثر مبيعاً',
+    ascending: 'تصاعدي (A-Z)',
+    descending: 'تنازلي (Z-A)',
+    addProduct: 'إضافة منتج',
+    updateProduct: 'تحديث المنتج',
+    uploadCSV: 'تحميل CSV',
+    downloadCSV: 'تنزيل CSV',
+    voiceSearch: 'البحث الصوتي',
+    expiryAlerts: 'تنبيهات انتهاء الصلاحية',
+    expiryAlertsDesc: 'المنتجات التالية تقترب من تاريخ انتهاء صلاحيتها (خلال 30 يومًا).',
+    businessSnapshot: 'لقطة للأعمال',
+    totalExpenses: 'إجمالي المصاريف',
   }
 };
 
@@ -1828,7 +1916,7 @@ const ErrorBoundary = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
 
-function SettingsPanel({ settings, onSaveSettings, users, onAddUser, onDeleteUser }: { settings: ShopSettings, onSaveSettings: (s: ShopSettings) => void, users: AppUser[], onAddUser: (u: Omit<AppUser, 'id'>) => void, onDeleteUser: (id: string) => void }) {
+function SettingsPanel({ settings, onSaveSettings, users, onAddUser, onDeleteUser, isSaving }: { settings: ShopSettings, onSaveSettings: (s: ShopSettings) => void, users: AppUser[], onAddUser: (u: Omit<AppUser, 'id'>) => void, onDeleteUser: (id: string) => void, isSaving: boolean }) {
   const [activeSubTab, setActiveSubTab] = useState<'shop' | 'users'>('shop');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
@@ -1850,6 +1938,7 @@ function SettingsPanel({ settings, onSaveSettings, users, onAddUser, onDeleteUse
     }
 
     onSaveSettings({
+      ...settings,
       name: formData.get('name') as string,
       address: formData.get('address') as string,
       phone: formData.get('phone') as string,
@@ -2015,8 +2104,9 @@ function SettingsPanel({ settings, onSaveSettings, users, onAddUser, onDeleteUse
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number ID (Meta Cloud Only)</label>
-                <input name="waPhoneNumberId" defaultValue={settings.waPhoneNumberId} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
+                <label className="block text-sm font-medium text-gray-700 mb-1">WhatsApp Phone Number ID (Meta) / Instance ID (Generic)</label>
+                <input name="waPhoneNumberId" placeholder="Phone Number ID (Meta)" defaultValue={settings.waPhoneNumberId} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none mb-2" />
+                <input name="waInstanceId" placeholder="Instance ID (Generic)" defaultValue={settings.waInstanceId} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
               </div>
 
               <div>
@@ -2096,9 +2186,9 @@ function SettingsPanel({ settings, onSaveSettings, users, onAddUser, onDeleteUse
                 </select>
               </div>
             </div>
-            <button type="submit" className="px-8 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center gap-2">
-              <Save className="w-5 h-5" />
-              Update Settings
+            <button type="submit" disabled={isSaving} className="px-8 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+              {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+              {isSaving ? 'Updating...' : 'Update Settings'}
             </button>
           </form>
         </div>
@@ -2451,6 +2541,9 @@ export default function App() {
   const [editingSale, setEditingSale] = useState<Sale | null>(null);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [notification, setNotification] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isSavingProduct, setIsSavingProduct] = useState(false);
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
   const [customerSuggestion, setCustomerSuggestion] = useState('');
   const [isCustomerVoiceListening, setIsCustomerVoiceListening] = useState(false);
@@ -3057,6 +3150,7 @@ export default function App() {
 
   const handleCheckout = async (sendWhatsApp: boolean = false) => {
     if (cart.length === 0) return;
+    setIsCheckingOut(true);
 
     try {
       const selectedCustomer = customers.find(c => c.id === checkoutData.customerId);
@@ -3065,6 +3159,7 @@ export default function App() {
       // Enforce full payment for walk-in customers
       if (!checkoutData.customerId && paidAmount < finalTotal) {
         setNotification({ message: "Walk-in customers must pay in full!", type: 'error' });
+        setIsCheckingOut(false);
         return;
       }
 
@@ -3191,6 +3286,9 @@ export default function App() {
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'sales');
+      setNotification({ message: "Failed to complete transaction. Please try again.", type: 'error' });
+    } finally {
+      setIsCheckingOut(false);
     }
   };
 
@@ -3385,13 +3483,43 @@ export default function App() {
     }
   };
 
+  const addCategory = async (name: string) => {
+    if (!user || !user.shopId) return;
+    await addDoc(collection(db, 'categories'), { name, shopId: user.shopId });
+  };
+  const deleteCategory = async (id: string) => {
+    await deleteDoc(doc(db, 'categories', id));
+  };
+  const updateCategory = async (id: string, name: string) => {
+    await updateDoc(doc(db, 'categories', id), { name });
+  };
+
   const handleSaveSettings = async (newSettings: ShopSettings) => {
+    setIsSavingSettings(true);
     try {
       if (!user || !user.shopId) throw new Error("No shopId found");
+      
+      // Update global shop overview for master admin
+      const shopRef = doc(db, 'shops', user.shopId);
+      const shopSnap = await getDoc(shopRef);
+      if (shopSnap.exists()) {
+        await updateDoc(shopRef, {
+          name: newSettings.name,
+          address: newSettings.address,
+          phone: newSettings.phone,
+          updatedAt: serverTimestamp()
+        });
+      }
+
+      // Update shop-specific settings
       await setDoc(doc(db, 'settings', user.shopId), { ...newSettings, shopId: user.shopId });
+      
       setNotification({ message: 'Settings updated successfully', type: 'success' });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings');
+      setNotification({ message: 'Failed to update settings', type: 'error' });
+    } finally {
+      setIsSavingSettings(false);
     }
   };
 
@@ -3802,33 +3930,33 @@ export default function App() {
             {[
               ...(isMasterAdmin ? [{ 
                 id: 'master', 
-                label: 'Master Console', 
+                label: 'master_console', 
                 items: [
                   { id: 'shops', icon: Shield, label: 'Merchant Network Console', roles: ['admin', 'manager', 'sales_team', 'assistant_manager'], color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-100' }
                 ] 
               }] : []),
-              { id: 'core', label: 'Core', items: [
+              { id: 'core', label: 'core', items: [
                 { id: 'dashboard', icon: LayoutDashboard, label: st('dashboard'), roles: ['admin', 'manager'], color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100' },
                 { id: 'pos', icon: ShoppingCart, label: st('pos'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'], color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100' },
               ]},
-              { id: 'inventory', label: 'Inventory', items: [
+              { id: 'inventory', label: 'inventory_group', items: [
                 { id: 'inventory', icon: Package, label: st('inventory'), roles: ['admin', 'manager', 'assistant_manager'], color: 'text-orange-600', bg: 'bg-orange-50', border: 'border-orange-100' },
                 { id: 'category', icon: Tag, label: st('category'), roles: ['admin', 'manager'], color: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-100' },
                 { id: 'warehouse', icon: Warehouse, label: st('warehouse'), roles: ['admin', 'manager'], color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100' },
                 { id: 'supplier', icon: Users, label: st('supplier'), roles: ['admin', 'manager'], color: 'text-sky-600', bg: 'bg-sky-50', border: 'border-sky-100' },
                 { id: 'barcode', icon: Barcode, label: st('barcode'), roles: ['admin', 'manager'], color: 'text-slate-600', bg: 'bg-slate-50', border: 'border-slate-100' },
               ]},
-              { id: 'sales_crm', label: 'Sales & CRM', items: [
+              { id: 'sales_crm', label: 'sales_crm', items: [
                 { id: 'sales', icon: History, label: st('sales'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager'], color: 'text-violet-600', bg: 'bg-violet-50', border: 'border-violet-100' },
                 { id: 'customers', icon: Users, label: st('customers'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager'], color: 'text-pink-600', bg: 'bg-pink-50', border: 'border-pink-100' },
                 { id: 'loan_management', icon: Banknote, label: st('loanManagement'), roles: ['admin', 'manager'], color: 'text-rose-600', bg: 'bg-rose-50', border: 'border-rose-100' },
               ]},
-              { id: 'accounting', label: 'Accounting', items: [
+              { id: 'accounting', label: 'accounting', items: [
                 { id: 'accounting', icon: CalculatorIcon, label: st('hishabNikash'), roles: ['admin', 'manager'], color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-100' },
                 { id: 'daily_closing', icon: Clock, label: st('dailyClosing'), roles: ['admin', 'manager'], color: 'text-cyan-600', bg: 'bg-cyan-50', border: 'border-cyan-100' },
                 { id: 'payment_method', icon: CreditCard, label: st('paymentMethod'), roles: ['admin', 'manager'], color: 'text-teal-600', bg: 'bg-teal-50', border: 'border-teal-100' },
               ]},
-              { id: 'management', label: 'Management', items: [
+              { id: 'management', label: 'management', items: [
                 { id: 'online_shop', icon: Globe, label: st('onlineShop'), roles: ['admin', 'manager'], color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100' },
                 { id: 'courier', icon: Truck, label: st('courier'), roles: ['admin', 'manager'], color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-100' },
                 { id: 'warranty', icon: ShieldCheck, label: st('warranty'), roles: ['admin', 'manager'], color: 'text-cyan-600', bg: 'bg-cyan-50', border: 'border-cyan-100' },
@@ -3843,7 +3971,7 @@ export default function App() {
               ]},
             ].map((group) => (
               <div key={group.id} className="space-y-1 mb-6">
-                <h3 className="px-5 text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">{group.label}</h3>
+                <h3 className="px-5 text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">{st(group.label as any)}</h3>
                 {group.items.filter(item => (user && item.roles.includes(user.role)) || (item.id === 'shops' && isMasterAdmin)).map((item, idx) => (
                   <motion.button
                     key={item.id}
@@ -3920,6 +4048,7 @@ export default function App() {
                   setSelectedProductForHistory(p);
                 }}
                 isOnline={isOnline}
+                user={user}
                 expiringProducts={expiringProducts}
               />
             )}
@@ -3964,6 +4093,7 @@ export default function App() {
                 customerSuggestion={customerSuggestion}
                 isCustomerVoiceListening={isCustomerVoiceListening}
                 setIsCustomerVoiceListening={setIsCustomerVoiceListening}
+                isCheckingOut={isCheckingOut}
               />
             )}
             {activeTab === 'inventory' && (
@@ -3978,6 +4108,9 @@ export default function App() {
                 setNotification={setNotification}
                 isOnline={isOnline}
                 settings={shopSettings}
+                isSaving={isSavingProduct}
+                setIsSaving={setIsSavingProduct}
+                user={user}
               />
             )}
             {activeTab === 'category' && (
@@ -4029,6 +4162,7 @@ export default function App() {
                 settings={shopSettings}
                 user={user}
                 onDelete={handleDeleteDailyClosing}
+                setNotification={setNotification}
               />
             )}
             {activeTab === 'barcode' && (
@@ -4092,6 +4226,7 @@ export default function App() {
                 users={appUsers}
                 onAddUser={handleAddUser}
                 onDeleteUser={handleDeleteUser}
+                isSaving={isSavingSettings}
               />
             )}
             {activeTab === 'recycle_bin' && (
@@ -4280,6 +4415,7 @@ export default function App() {
           settings={shopSettings}
         />
         <Calculator settings={shopSettings} />
+        <NotificationToast notification={notification} onClose={() => setNotification(null)} />
       </div>
     </ErrorBoundary>
   );
@@ -4309,8 +4445,55 @@ function BarcodeScanner({ onScan, onClose }: { onScan: (data: string) => void, o
   );
 }
 
+function NotificationToast({ notification, onClose }: { 
+  notification: { message: string, type: 'success' | 'error' | 'info' } | null, 
+  onClose: () => void 
+}) {
+  useEffect(() => {
+    if (notification) {
+      const timer = setTimeout(() => {
+        onClose();
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [notification, onClose]);
 
-function Dashboard({ products, sales, customers, expenses, dailyClosings, settings, onDelete, onViewProductHistory, isOnline, expiringProducts = [] }: { products: Product[], sales: Sale[], customers: Customer[], expenses: Expense[], dailyClosings: DailyClosing[], settings: ShopSettings, onDelete: (closing: DailyClosing) => void, onViewProductHistory: (p: Product) => void, isOnline: boolean, expiringProducts?: Product[] }) {
+  return (
+    <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[200] w-full max-w-sm px-4 pointer-events-none">
+      <AnimatePresence>
+        {notification && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            className={`p-4 rounded-2xl shadow-2xl border flex items-center gap-4 pointer-events-auto ${
+              notification.type === 'success' ? 'bg-emerald-50 border-emerald-100 text-emerald-800' :
+              notification.type === 'error' ? 'bg-rose-50 border-rose-100 text-rose-800' :
+              'bg-indigo-50 border-indigo-100 text-indigo-800'
+            }`}
+          >
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+              notification.type === 'success' ? 'bg-emerald-100 text-emerald-600' :
+              notification.type === 'error' ? 'bg-rose-100 text-rose-600' :
+              'bg-indigo-100 text-indigo-600'
+            }`}>
+              {notification.type === 'success' ? <CheckCircle2 className="w-6 h-6" /> :
+               notification.type === 'error' ? <AlertCircle className="w-6 h-6" /> :
+               <Info className="w-6 h-6" />}
+            </div>
+            <p className="font-bold text-sm flex-1">{notification.message}</p>
+            <button onClick={onClose} className="p-2 hover:bg-black/5 rounded-full transition-colors">
+              <X className="w-4 h-4 opacity-50" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+
+function Dashboard({ products, sales, customers, expenses, dailyClosings, settings, onDelete, onViewProductHistory, isOnline, user, expiringProducts = [] }: { products: Product[], sales: Sale[], customers: Customer[], expenses: Expense[], dailyClosings: DailyClosing[], settings: ShopSettings, onDelete: (closing: DailyClosing) => void, onViewProductHistory: (p: Product) => void, isOnline: boolean, user: any, expiringProducts?: Product[] }) {
   const systemLang = settings.systemLanguage || 'bn';
   const st = (key: keyof typeof SYSTEM_TRANSLATIONS['en']) => (SYSTEM_TRANSLATIONS[systemLang] as any)[key] || (SYSTEM_TRANSLATIONS['en'] as any)[key];
   const [period, setPeriod] = useState<'day' | 'week' | 'month' | 'year'>('day');
@@ -4459,7 +4642,7 @@ function Dashboard({ products, sales, customers, expenses, dailyClosings, settin
           </div>
           <div>
             <h2 className="text-3xl font-black text-gray-900 tracking-tight">{st('dashboard')}</h2>
-            <p className="text-gray-400 font-medium">{st('welcome')}, Admin! Here is your business snapshot.</p>
+            <p className="text-gray-400 font-medium">{st('welcome')}, {user?.email?.split('@')[0]}! {st('businessSnapshot')}.</p>
           </div>
         </div>
         <div className="flex bg-gray-50/50 p-1.5 rounded-2xl border border-gray-100 shadow-inner self-start md:self-auto">
@@ -4473,10 +4656,10 @@ function Dashboard({ products, sales, customers, expenses, dailyClosings, settin
                 : 'text-gray-400 hover:text-gray-600 hover:bg-white/50'
               }`}
             >
-              {p === 'day' ? (systemLang === 'bn' ? 'আজ' : p === 'ar' ? 'اليوم' : 'Today') : 
-               p === 'week' ? (systemLang === 'bn' ? 'এই সপ্তাহ' : p === 'ar' ? 'হذا الأسبوع' : 'This Week') :
-               p === 'month' ? (systemLang === 'bn' ? 'এই মাস' : p === 'ar' ? 'হذا الشهر' : 'This Month') :
-               (systemLang === 'bn' ? 'এই বছর' : p === 'ar' ? 'হذه السنة' : 'This Year')}
+              {p === 'day' ? (systemLang === 'bn' ? 'আজ' : systemLang === 'ar' ? 'اليوم' : 'Today') : 
+               p === 'week' ? (systemLang === 'bn' ? 'এই সপ্তাহ' : systemLang === 'ar' ? 'هذا الأسبوع' : 'This Week') :
+               p === 'month' ? (systemLang === 'bn' ? 'এই মাস' : systemLang === 'ar' ? 'هذا الشهر' : 'This Month') :
+               (systemLang === 'bn' ? 'এই বছর' : systemLang === 'ar' ? 'هذه السنة' : 'This Year')}
             </button>
           ))}
         </div>
@@ -4495,8 +4678,8 @@ function Dashboard({ products, sales, customers, expenses, dailyClosings, settin
               <AlertTriangle className="w-7 h-7" />
             </div>
             <div>
-              <h3 className="text-2xl font-black text-amber-900 tracking-tight">System Notification: Expiry Alerts</h3>
-              <p className="text-amber-700/70 font-bold text-sm">The following products are nearing their expiry date (within 30 days).</p>
+              <h3 className="text-2xl font-black text-amber-900 tracking-tight">{st('expiryAlerts')}</h3>
+              <p className="text-amber-700/70 font-bold text-sm">{st('expiryAlertsDesc')}</p>
             </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -7383,7 +7566,8 @@ function POS({
   setIsCustomerModalOpen,
   customerSuggestion,
   isCustomerVoiceListening,
-  setIsCustomerVoiceListening
+  setIsCustomerVoiceListening,
+  isCheckingOut
 }: { 
   products: Product[],
   customers: Customer[],
@@ -7417,7 +7601,8 @@ function POS({
   setIsCustomerModalOpen?: (o: boolean) => void,
   customerSuggestion?: string,
   isCustomerVoiceListening?: boolean,
-  setIsCustomerVoiceListening?: (l: boolean) => void
+  setIsCustomerVoiceListening?: (l: boolean) => void,
+  isCheckingOut: boolean
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -7955,7 +8140,7 @@ function POS({
             </div>
 
             <button 
-              disabled={cart.length === 0}
+              disabled={cart.length === 0 || isCheckingOut}
               onClick={() => {
                  if (!checkoutData.paidAmount && checkoutData.paidAmount !== 0) {
                     setCheckoutData({...checkoutData, paidAmount: finalTotal});
@@ -7964,8 +8149,8 @@ function POS({
               }}
               className={`w-full py-4 bg-${theme.primary} text-white rounded-2xl font-black text-[15px] shadow-xl ${theme.shadow} hover:opacity-90 disabled:bg-gray-200 disabled:shadow-none transition-all flex items-center justify-center gap-3 active:scale-[0.98] uppercase tracking-widest mt-2 border-b-4 border-black/10`}
             >
-              <Banknote className="w-6 h-6" />
-              Pay Now
+              {isCheckingOut ? <Loader2 className="w-6 h-6 animate-spin" /> : <Banknote className="w-6 h-6" />}
+              {isCheckingOut ? 'Processing...' : 'Pay Now'}
             </button>
           </div>
         </div>
@@ -8004,7 +8189,7 @@ function POS({
   );
 }
 
-function Inventory({ products, categories, stockRecords, sales, onViewHistory, setNotification, isOnline, settings }: { 
+function Inventory({ products, categories, stockRecords, sales, onViewHistory, setNotification, isOnline, settings, isSaving, setIsSaving, user }: { 
   products: Product[], 
   categories: Category[], 
   stockRecords: StockRecord[],
@@ -8012,8 +8197,13 @@ function Inventory({ products, categories, stockRecords, sales, onViewHistory, s
   onViewHistory: (p: Product) => void,
   setNotification: (n: { message: string, type: 'success' | 'error' | 'info' } | null) => void,
   isOnline: boolean,
-  settings: ShopSettings
+  settings: ShopSettings,
+  isSaving: boolean,
+  setIsSaving: (v: boolean) => void,
+  user: any
 }) {
+  const systemLang = settings.systemLanguage || 'bn';
+  const st = (key: keyof typeof SYSTEM_TRANSLATIONS['en']) => (SYSTEM_TRANSLATIONS[systemLang] as any)[key] || (SYSTEM_TRANSLATIONS['en'] as any)[key];
   const [productSortBy, setProductSortBy] = useState<string>('serial');
   const [productSortOrder, setProductSortOrder] = useState<'asc' | 'desc'>('asc');
   const [currentPage, setCurrentPage] = useState(1);
@@ -8275,16 +8465,11 @@ Return the result as JSON with a "category" field containing exactly one string 
     return () => window.removeEventListener('click', handleClick);
   }, []);
 
-  const addCategory = async (name: string) => {
-    if (!user || !user.shopId) return;
-    await addDoc(collection(db, 'categories'), { name, shopId: user.shopId });
-  };
-  const deleteCategory = async (id: string) => {
-    await deleteDoc(doc(db, 'categories', id));
-  };
-  const updateCategory = async (id: string, name: string) => {
-    await updateDoc(doc(db, 'categories', id), { name });
-  };
+  // Category management moved to App level or should be accessed via props if needed
+  // However, local addCategory was shadowing if we had it in props
+  // We keep it in props if we want to pass it down, but since it's already used in CategoryManagement,
+  // we should pass it to Inventory too if needed.
+  // Actually, line 8449 had it defined. Let's see if we can remove it from Inventory body.
 
 
   const salesCount: Record<string, number> = {};
@@ -8560,6 +8745,9 @@ Return the result as JSON with a "category" field containing exactly one string 
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return;
+    setIsSaving(true);
+    
     const form = e.target as HTMLFormElement;
     const formData = new FormData(form);
     const imageFile = (form.querySelector('input[type="file"]') as HTMLInputElement)?.files?.[0];
@@ -8587,12 +8775,14 @@ Return the result as JSON with a "category" field containing exactly one string 
 
     if (!productData.name || isNaN(productData.price) || productData.price < 0) {
       setNotification({ message: "Please enter a valid product name and price.", type: 'error' });
+      setIsSaving(false);
       return;
     }
 
     try {
       if (editingProduct?.id) {
         await updateDoc(doc(db, 'products', editingProduct.id), productData);
+        setNotification({ message: "Product updated successfully!", type: 'success' });
       } else {
         // Generate serial number
         const maxSerial = products.reduce((max, p) => Math.max(max, p.serialNumber || 0), 0);
@@ -8602,12 +8792,16 @@ Return the result as JSON with a "category" field containing exactly one string 
           serialNumber: maxSerial + 1
         };
         await addDoc(collection(db, 'products'), newProduct);
+        setNotification({ message: "Product added successfully!", type: 'success' });
       }
       setIsModalOpen(false);
       setEditingProduct(null);
       setProductImage(null);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'products');
+      setNotification({ message: "Failed to save product.", type: 'error' });
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -8717,18 +8911,18 @@ Return the result as JSON with a "category" field containing exactly one string 
             <Package className="w-9 h-9 relative z-10" />
           </motion.div>
           <div>
-            <h2 className="text-3xl font-black text-gray-900 tracking-tight leading-tight">Stock Inventory</h2>
+            <h2 className="text-3xl font-black text-gray-900 tracking-tight leading-tight">{st('stockInventory')}</h2>
             <div className="flex flex-wrap items-center gap-3 mt-1.5">
               <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Efficient Resource Management</span>
               <span className="w-1 h-1 bg-gray-300 rounded-full hidden sm:block"></span>
               <div className="flex items-center gap-2">
                 <span className="px-2.5 py-1 bg-amber-50 text-amber-700 text-[10px] font-black uppercase tracking-widest rounded-xl border border-amber-100 flex items-center gap-1.5 shadow-sm">
                   <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse"></span>
-                  Products: {products.length}
+                  {st('products')}: {products.length}
                 </span>
                 <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-[10px] font-black uppercase tracking-widest rounded-xl border border-emerald-100 flex items-center gap-1.5 shadow-sm">
                   <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
-                  Live Stock: {Math.round(products.reduce((sum, p) => sum + (p.stock || 0), 0))}
+                  {st('liveStock')}: {Math.round(products.reduce((sum, p) => sum + (p.stock || 0), 0))}
                 </span>
               </div>
             </div>
@@ -8741,15 +8935,15 @@ Return the result as JSON with a "category" field containing exactly one string 
             onChange={(e) => setProductSortBy(e.target.value)}
             className="px-4 py-4 bg-white border border-gray-100 rounded-2xl text-sm font-bold text-gray-700 shadow-sm focus:ring-2 focus:ring-amber-500 outline-none cursor-pointer appearance-none min-w-[140px]"
           >
-            <option value="serial">Sort: Serial No.</option>
-            <option value="name">Sort: Name</option>
-            <option value="company">Sort: Company</option>
-            <option value="near_expire">Sort: Near Expire</option>
-            <option value="expired_filter">Show: Expired Only</option>
-            <option value="price">Sort: Price</option>
-            <option value="stock">Sort: Stock</option>
-            <option value="long_time_no_sell">Sort: Long Time No Sell</option>
-            <option value="trending">Sort: Trending</option>
+            <option value="serial">{st('sortSerial')}</option>
+            <option value="name">{st('sortName')}</option>
+            <option value="company">{st('sortCompany')}</option>
+            <option value="near_expire">{st('sortNearExpire')}</option>
+            <option value="expired_filter">{st('showExpiredOnly')}</option>
+            <option value="price">{st('sortPrice')}</option>
+            <option value="stock">{st('sortStock')}</option>
+            <option value="long_time_no_sell">{st('sortLongTimeNoSell')}</option>
+            <option value="trending">{st('sortTrending')}</option>
           </select>
 
           <select
@@ -8757,8 +8951,8 @@ Return the result as JSON with a "category" field containing exactly one string 
             onChange={(e) => setProductSortOrder(e.target.value as 'asc' | 'desc')}
             className="px-4 py-4 bg-white border border-gray-100 rounded-2xl text-sm font-bold text-gray-700 shadow-sm focus:ring-2 focus:ring-amber-500 outline-none cursor-pointer appearance-none"
           >
-            <option value="asc">Ascending (Low to High / A-Z)</option>
-            <option value="desc">Descending (High to Low / Z-A)</option>
+            <option value="asc">{st('ascending')}</option>
+            <option value="desc">{st('descending')}</option>
           </select>
 
           <motion.button 
@@ -8770,7 +8964,7 @@ Return the result as JSON with a "category" field containing exactly one string 
             <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isListening ? 'bg-white/20' : 'bg-gray-50'}`}>
               <Mic className={`w-4 h-4 ${isListening ? 'animate-bounce' : ''}`} />
             </div>
-            {isListening ? 'Listening...' : 'Voice Search'}
+            {isListening ? (systemLang === 'bn' ? 'শুনছি...' : systemLang === 'ar' ? 'استماع...' : 'Listening...') : st('voiceSearch')}
             
             <AnimatePresence>
               {voiceFeedback && (
@@ -8798,7 +8992,7 @@ Return the result as JSON with a "category" field containing exactly one string 
             className={`px-8 py-4 bg-gradient-to-r ${theme.gradient} text-white rounded-[1.5rem] font-black shadow-xl ${theme.shadow} hover:shadow-2xl transition-all flex items-center gap-3 transform uppercase tracking-widest text-xs h-full`}
           >
             <Plus className="w-5 h-5" />
-            Add Product
+            {st('addProduct')}
           </motion.button>
         </div>
       </motion.header>
@@ -8816,7 +9010,7 @@ Return the result as JSON with a "category" field containing exactly one string 
               <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5 group-focus-within:text-amber-500 transition-colors" />
               <input 
                 type="text"
-                placeholder="Search Inventory (Name/Serial/Smart)..."
+                placeholder={st('search')}
                 className="w-full pl-14 pr-6 py-4 bg-gray-50/50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-amber-500 transition-all outline-none placeholder:text-gray-400"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -8828,11 +9022,11 @@ Return the result as JSON with a "category" field containing exactly one string 
                 whileTap={{ scale: 0.9 }}
                 onClick={handleDownloadCSV}
                 className="p-4 bg-gray-50 text-gray-500 rounded-2xl hover:bg-emerald-50 hover:text-emerald-600 transition-all shadow-sm flex-1 sm:flex-none flex justify-center"
-                title="Export CSV"
+                title={st('downloadCSV')}
               >
                 <Download className="w-5 h-5" />
               </motion.button>
-              <label className="p-4 bg-gray-50 text-gray-500 rounded-2xl hover:bg-blue-50 hover:text-blue-600 transition-all cursor-pointer shadow-sm flex-1 sm:flex-none flex justify-center" title="Import CSV (Destructive)">
+              <label className="p-4 bg-gray-50 text-gray-500 rounded-2xl hover:bg-blue-50 hover:text-blue-600 transition-all cursor-pointer shadow-sm flex-1 sm:flex-none flex justify-center" title={st('uploadCSV')}>
                 <Upload className="w-5 h-5" />
                 <input type="file" accept=".csv" onChange={handleUploadCSV} className="hidden" />
               </label>
@@ -9408,9 +9602,14 @@ Return the result as JSON with a "category" field containing exactly one string 
                   </div>
                 </div>
                 <div className="flex justify-end gap-4 pt-4">
-                  <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-3 text-gray-600 font-semibold hover:bg-gray-100 rounded-xl transition-colors">Cancel</button>
-                  <button type="submit" className="px-8 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100">
-                    Save Product
+                  <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-3 text-gray-600 font-semibold hover:bg-gray-100 rounded-xl transition-colors" disabled={isSaving}>Cancel</button>
+                  <button 
+                    type="submit" 
+                    disabled={isSaving}
+                    className="px-8 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed min-w-[140px]"
+                  >
+                    {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
+                    {isSaving ? 'Saving...' : 'Save Product'}
                   </button>
                 </div>
               </form>
@@ -10463,7 +10662,7 @@ function Accounting({
 
         <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 relative group overflow-hidden transition-all hover:shadow-xl hover:shadow-indigo-100/50">
           <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-            <ShieldIcon className="w-12 h-12 text-indigo-600" />
+            <ShieldCheck className="w-12 h-12 text-indigo-600" />
           </div>
           <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-3">Total Investments</p>
           <h3 className="text-3xl font-black font-mono tracking-tighter text-indigo-600">{fC(totalInvestments)}</h3>
@@ -11867,14 +12066,15 @@ function Customers({
   );
 }
 
-function DailyClosingView({ sales, expenses, dailyClosings, duePayments, settings, user, onDelete }: { 
+function DailyClosingView({ sales, expenses, dailyClosings, duePayments, settings, user, onDelete, setNotification }: { 
   sales: Sale[], 
   expenses: Expense[], 
   dailyClosings: DailyClosing[], 
   duePayments: DuePayment[],
   settings: ShopSettings, 
   user?: any, 
-  onDelete: (closing: DailyClosing) => void 
+  onDelete: (closing: DailyClosing) => void,
+  setNotification: (n: { message: string, type: 'success' | 'error' | 'info' } | null) => void 
 }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [closingToDelete, setClosingToDelete] = useState<DailyClosing | null>(null);
