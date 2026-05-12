@@ -8,6 +8,7 @@ import { parsePosVoiceCommandAI } from './utils/aiVoiceParser';
 import { addToSyncQueue, getSyncQueue, removeFromSyncQueue } from './utils/offlineDb';
 import { 
   LayoutDashboard, 
+  ChevronLeft,
   Package, 
   ShoppingCart, 
   History, 
@@ -2572,15 +2573,19 @@ export default function App() {
   const [isOnboarded, setIsOnboarded] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 1024);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    const saved = localStorage.getItem('sidebar_visible');
+    return saved !== null ? saved === 'true' : window.innerWidth >= 1024;
+  });
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
   useEffect(() => {
+    localStorage.setItem('sidebar_visible', String(isSidebarOpen));
+  }, [isSidebarOpen]);
+
+  useEffect(() => {
     const handleResize = () => {
-      if (window.innerWidth >= 1024) {
-        // Optional: you could auto-open here, but let's just leave it to the user's last state
-        // if they shrunk the window and then expanded it.
-      }
+      // Auto-adjust if needed, but let's respect user choice mostly
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
@@ -4188,36 +4193,51 @@ export default function App() {
         </AnimatePresence>
 
         {/* Sidebar */}
-        <aside className={`
-          fixed inset-y-0 ${isRtl ? 'right-0' : 'left-0'} z-50 bg-white border-r border-gray-200 flex flex-col transition-all duration-500 shadow-2xl lg:shadow-none
-          ${isSidebarOpen ? 'w-72 translate-x-0' : 'w-0 ' + (isRtl ? 'translate-x-full' : '-translate-x-full')}
-          ${isSidebarOpen ? 'lg:static lg:w-72 lg:translate-x-0' : 'lg:fixed lg:w-0 lg:overflow-hidden lg:border-none'}
-          lg:h-screen
-        `}>
-          <div className="p-6 hidden lg:flex items-center justify-between gap-3 relative overflow-hidden group">
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
-            <div className="flex items-center gap-3">
-              <motion.div 
-                whileHover={{ rotate: 360 }}
-                transition={{ duration: 0.8, ease: "anticipate" }}
-                className="w-11 h-11 bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-100"
-              >
-                <Building2 className="w-6 h-6 text-white" />
-              </motion.div>
-              <div className="flex flex-col">
-                <span className="font-black text-xl text-gray-900 tracking-tight leading-none group-hover:text-indigo-600 transition-colors uppercase">{shopSettings.name}</span>
-                <span className="text-[10px] font-bold text-gray-400 mt-1 uppercase tracking-widest">Business Suite</span>
-              </div>
-            </div>
-            
-            <button 
-              onClick={() => setIsSidebarOpen(false)}
-              className="p-2 hover:bg-gray-100 rounded-xl transition-all text-gray-400 hover:text-indigo-600 border border-transparent hover:border-indigo-100"
-              title="Hide Sidebar"
+        <AnimatePresence mode="wait">
+          {isSidebarOpen || window.innerWidth >= 1024 ? (
+            <motion.aside 
+              initial={window.innerWidth < 1024 ? { x: isRtl ? 300 : -300 } : { width: 0, opacity: 0 }}
+              animate={isSidebarOpen 
+                ? { x: 0, width: 288, opacity: 1 } 
+                : (window.innerWidth < 1024 
+                    ? { x: isRtl ? 300 : -300, width: 0, opacity: 0 }
+                    : { width: 0, opacity: 0, x: isRtl ? 50 : -50 }
+                  )
+              }
+              exit={window.innerWidth < 1024 ? { x: isRtl ? 300 : -300 } : { width: 0, opacity: 0 }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
+              className={`
+                fixed inset-y-0 ${isRtl ? 'right-0' : 'left-0'} z-50 bg-white border-r border-gray-100 flex flex-col shadow-2xl lg:shadow-none
+                ${window.innerWidth >= 1024 ? 'lg:static lg:h-screen' : ''}
+                ${!isSidebarOpen && window.innerWidth >= 1024 ? 'hidden lg:flex transition-none' : 'flex'}
+                overflow-hidden
+              `}
+              style={!isSidebarOpen && window.innerWidth >= 1024 ? { display: 'none' } : {}}
             >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
+              <div className="p-6 flex items-center justify-between gap-3 relative overflow-hidden group">
+                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
+                <div className="flex items-center gap-3">
+                  <motion.div 
+                    whileHover={{ rotate: 360 }}
+                    transition={{ duration: 0.8, ease: "anticipate" }}
+                    className="w-11 h-11 bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-100"
+                  >
+                    <Building2 className="w-6 h-6 text-white" />
+                  </motion.div>
+                  <div className="flex flex-col whitespace-nowrap">
+                    <span className="font-black text-xl text-gray-900 tracking-tight leading-none group-hover:text-indigo-600 transition-colors uppercase">{shopSettings.name}</span>
+                    <span className="text-[10px] font-bold text-gray-400 mt-1 uppercase tracking-widest">Business Suite</span>
+                  </div>
+                </div>
+                
+                <button 
+                  onClick={() => setIsSidebarOpen(false)}
+                  className="p-2 hover:bg-rose-50 rounded-xl transition-all text-gray-400 hover:text-rose-600 border border-transparent hover:border-rose-100"
+                  title="Hide Sidebar"
+                >
+                  <ChevronLeft className={`w-5 h-5 transition-transform ${isRtl ? 'rotate-180' : ''}`} />
+                </button>
+              </div>
 
           <nav className="flex-1 px-4 py-6 overflow-y-auto custom-scrollbar space-y-1.5 bg-gray-50/30">
             {[
@@ -4340,22 +4360,30 @@ export default function App() {
               {st('logout')}
             </motion.button>
           </div>
-        </aside>
+            </motion.aside>
+          ) : null}
+        </AnimatePresence>
 
         {/* Main Content */}
         <main className="flex-1 p-4 lg:p-8 overflow-x-hidden relative">
-          {!isSidebarOpen && (
-            <motion.button 
-              initial={{ scale: 0, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              onClick={() => setIsSidebarOpen(true)}
-              className="hidden lg:flex fixed left-6 top-6 z-40 p-3.5 bg-white border border-gray-200 rounded-2xl text-indigo-600 shadow-2xl shadow-indigo-100 hover:bg-indigo-50 transition-all group"
-            >
-              <Menu className="w-6 h-6 group-hover:rotate-12 transition-transform" />
-            </motion.button>
-          )}
+          <AnimatePresence>
+            {!isSidebarOpen && (
+              <motion.button 
+                initial={{ x: -20, opacity: 0, scale: 0.8 }}
+                animate={{ x: 0, opacity: 1, scale: 1 }}
+                exit={{ x: -20, opacity: 0, scale: 0.8 }}
+                whileHover={{ scale: 1.05, x: 4 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setIsSidebarOpen(true)}
+                className={`hidden lg:flex fixed ${isRtl ? 'right-6' : 'left-6'} top-6 z-40 p-3 bg-white border border-gray-200 rounded-2xl text-indigo-600 shadow-xl shadow-indigo-100 hover:bg-indigo-50 transition-all group items-center gap-2`}
+              >
+                <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-200 group-hover:rotate-6 transition-transform">
+                  <Building2 className="w-5 h-5 text-white" />
+                </div>
+                <Menu className="w-5 h-5" />
+              </motion.button>
+            )}
+          </AnimatePresence>
           <AnimatePresence mode="wait">
             {activeTab === 'dashboard' && (
               <Dashboard 
