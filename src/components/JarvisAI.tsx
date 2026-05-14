@@ -1,0 +1,1440 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { 
+  X, 
+  Mic, 
+  MicOff,
+  Send,
+  Volume2,
+  VolumeX,
+  ShieldCheck,
+  Bot
+} from 'lucide-react';
+import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
+import { db, collection, doc, updateDoc, deleteDoc, addDoc, handleFirestoreError, OperationType } from '../firebase';
+
+// Standard Web Speech API types
+interface SpeechRecognitionEvent extends Event {
+  results: SpeechRecognitionResultList;
+  resultIndex: number;
+}
+
+interface SpeechRecognitionResultList {
+  readonly length: number;
+  [index: number]: SpeechRecognitionResult;
+}
+
+interface SpeechRecognitionResult {
+  readonly length: number;
+  [index: number]: SpeechRecognitionAlternative;
+  isFinal: boolean;
+}
+
+interface SpeechRecognitionAlternative {
+  transcript: string;
+  confidence: number;
+}
+
+interface SpeechRecognition extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start(): void;
+  stop(): void;
+  onerror: (event: any) => void;
+  onresult: (event: SpeechRecognitionEvent) => void;
+  onend: () => void;
+}
+
+declare global {
+  interface Window {
+    webkitSpeechRecognition: any;
+    SpeechRecognition: any;
+  }
+}
+
+interface JarvisAIProps {
+  onClose: () => void;
+  shopId: string;
+  systemData: {
+    items: any[];
+    sales: any[];
+    customers: any[];
+    categories: any[];
+    settings: any;
+  };
+  actions: {
+    addItem: (item: any) => Promise<any>;
+    addCustomer: (customer: any) => Promise<any>;
+    removeItem: (id: string) => Promise<void>;
+    navigate: (tab: string) => void;
+    addToPOS: (items: any[]) => void;
+    sendReminder: (customer: any) => void;
+    printLatestInvoice: () => void;
+    sendLatestInvoiceWhatsApp?: () => void;
+    createDirectSale: (saleData: any) => Promise<any>;
+  };
+}
+
+export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData, actions }) => {
+  const [isListening, setIsListening] = useState(false);
+  const [transcript, setTranscript] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  
+  const isProcessingRef = useRef(false);
+  const isSpeakingRef = useRef(false);
+  const isMutedRef = useRef(false);
+  
+  useEffect(() => { isProcessingRef.current = isProcessing; }, [isProcessing]);
+  useEffect(() => { isSpeakingRef.current = isSpeaking; }, [isSpeaking]);
+  useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
+  const [errorCount, setErrorCount] = useState(0);
+  
+  // Use settings from systemData
+  const language = systemData.settings.jarvisLanguage || 'bn';
+  const voiceGender = systemData.settings.jarvisVoiceGender === 'female' ? 'female' : 'male';
+
+  useEffect(() => {
+    console.log("JarvisAI Settings - Language:", language, "Voice Gender:", voiceGender);
+  }, [language, voiceGender]);
+
+  const [history, setHistory] = useState<{ role: 'user' | 'assistant', text: string }[]>([]);
+  
+  // Derived data for HUD
+  const todayRevenue = systemData.sales
+    .filter(s => new Date(s.date).toDateString() === new Date().toDateString())
+    .reduce((acc, s) => acc + (s.totalAmount || 0), 0);
+    
+  const recentSales = [...systemData.sales]
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    .slice(0, 3);
+  
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Removed toggleLanguage as per user request to manage it via settings panel instead
+
+  const handleVoiceCommandRef = useRef<(command: string) => void>();
+
+  const isStartingRef = useRef(false);
+
+  const startRecognition = (force = false) => {
+    if (!recognitionRef.current || (isProcessing && !force) || isStartingRef.current) return;
+    
+    isStartingRef.current = true;
+
+    try {
+      recognitionRef.current.stop();
+    } catch (e) {
+      // Ignore
+    }
+
+    // Use a small timeout to ensure the stop takes effect before starting
+    setTimeout(() => {
+      try {
+        if (!isProcessing || force) {
+          recognitionRef.current?.start();
+          setIsListening(true);
+        }
+      } catch (e: any) {
+        if (e.message.includes('already started')) {
+          setIsListening(true);
+        } else {
+          console.error("Failed to start recognition:", e);
+          setIsListening(false);
+        }
+      } finally {
+        isStartingRef.current = false;
+      }
+    }, 300); // Increased timeout slightly for better stability
+  };
+
+  // Initialize Speech Recognition
+  useEffect(() => {
+    // Warm up voices
+    const loadVoices = () => {
+      window.speechSynthesis.getVoices();
+    };
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+    
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false; 
+      recognition.interimResults = true;
+      recognition.lang = language === 'bn' ? 'bn-BD' : 'en-US'; 
+
+      recognition.onresult = (event: SpeechRecognitionEvent) => {
+        let interimTranscript = '';
+        let finalTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript;
+          } else {
+            interimTranscript += event.results[i][0].transcript;
+          }
+        }
+        
+        if (finalTranscript) {
+          if (handleVoiceCommandRef.current) {
+            handleVoiceCommandRef.current(finalTranscript);
+          }
+        } else {
+          setTranscript(interimTranscript);
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        if (event.error !== 'aborted' && event.error !== 'not-allowed' && event.error !== 'network' && event.error !== 'no-speech') {
+          console.error('Speech recognition error', event.error);
+        }
+        setIsListening(false);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+        // Restart speech recognition automatically if no explicit action is happening
+        // Check if the component is still active and not muted/speaking/processing
+        if (!isMutedRef.current && !isProcessingRef.current && !isSpeakingRef.current) {
+          setTimeout(() => {
+            if (!isMutedRef.current && !isProcessingRef.current && !isSpeakingRef.current) {
+              try {
+                // Ensure we don't start if already listening
+                if (recognitionRef.current) {
+                  recognition.start();
+                  setIsListening(true);
+                }
+              } catch (e) {
+                // Ignore start errors if already running
+              }
+            }
+          }, 400);
+        }
+      };
+
+      recognitionRef.current = recognition;
+    }
+    
+    return () => {
+      recognitionRef.current?.stop();
+    };
+  }, []); 
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [history, transcript]);
+
+  // Auto start on mount
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      startRecognition();
+    }, 800);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const toggleListening = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+    } else {
+      setTranscript('');
+      startRecognition();
+    }
+  };
+
+  // Update recognition language when state changes
+  useEffect(() => {
+    if (recognitionRef.current) {
+        recognitionRef.current.lang = language === 'bn' ? 'bn-BD' : 'en-US';
+    }
+  }, [language]);
+
+  const speak = (text: string): boolean => {
+    if (isMuted || !window.speechSynthesis) return false;
+    
+    // Stop any current speech
+    window.speechSynthesis.cancel();
+
+    // Clean text for TTS (remove symbols that confuse Bengali engines)
+    const cleanText = text
+      .replace(/[^\u0980-\u09FFa-zA-Z0-9\s,.?।!]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!cleanText) return false;
+
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    
+    // Voice selection
+    const voices = window.speechSynthesis.getVoices();
+    
+    // Normalize language codes
+    const isBengali = language === 'bn';
+    
+    // Better gender terms including common Bengali voice patterns
+    const genderTerms = voiceGender === 'female' 
+      ? ['female', 'google female', 'microsoft zira', 'samantha', 'victoria', 'kiti', 'pallabi', 'zaira', 'kalpana', 'hemant']
+      : ['male', 'google male', 'microsoft david', 'alex', 'daniel', 'ravi', 'kashyap', 'amit', 'niloy', 'bangladesh male', 'stefan', 'hemant'];
+
+    // High Quality Bengali Voice Patterns
+    // Priority: Specific regional high-quality voices -> Google/MS generic -> any bn
+    const preferredBengaliVoices = voiceGender === 'female'
+      ? ['google বাংলা', 'bn-bd-female', 'bn-in-female', 'pallabi', 'kiti', 'zaira', 'kalpana']
+      : ['google বাংলা', 'bn-bd-male', 'bn-in-male', 'amit', 'niloy', 'sagar', 'golam', 'hemant'];
+
+    let voice = voices.find(v => 
+      v.lang.toLowerCase().includes('bn') && 
+      preferredBengaliVoices.some(name => v.name.toLowerCase().includes(name))
+    );
+
+    // Try any voice with 'bn' and gender match
+    if (!voice) {
+      voice = voices.find(v => 
+        v.lang.toLowerCase().includes('bn') && 
+        genderTerms.some(term => v.name.toLowerCase().includes(term))
+      );
+    }
+
+    // Try any 'bn' voice
+    if (!voice) {
+      voice = voices.find(v => v.lang.toLowerCase().includes('bn'));
+    }
+
+    // Fallback for English
+    if (!isBengali && !voice) {
+      voice = voices.find(v => 
+        v.lang.toLowerCase().startsWith('en') && 
+        genderTerms.some(term => v.name.toLowerCase().includes(term))
+      );
+    }
+    
+    if (voice) {
+        console.log("TTS - Selected voice:", voice.name, "Lang:", voice.lang);
+        utterance.voice = voice;
+        utterance.lang = voice.lang;
+    } else {
+        console.warn("TTS - No suitable voice found for", language, voiceGender);
+        utterance.lang = isBengali ? 'bn-BD' : 'en-US';
+    }
+    
+    // Speed and Pitch optimization (Web Speech API can sound choppy if rate/pitch is modified too much, 1.0 is safest for natural voice on Android/Chrome)
+    utterance.rate = 1.0; 
+    utterance.pitch = 1.0; 
+
+    utterance.onstart = () => setIsSpeaking(true);
+    utterance.onend = () => {
+      setIsSpeaking(false);
+      if (!isMuted && !isProcessing) {
+        startRecognition(true);
+      }
+    };
+    utterance.onerror = (e) => {
+      console.error("SpeechSynthesis error:", e);
+      setIsSpeaking(false);
+      if (!isMuted && !isProcessing) {
+        startRecognition(true);
+      }
+    };
+
+    window.speechSynthesis.speak(utterance);
+    return true;
+  };
+
+  useEffect(() => {
+    handleVoiceCommandRef.current = handleVoiceCommand;
+  }, [systemData, actions, isMuted]);
+
+  const handleVoiceCommand = async (command: string) => {
+    if (!command.trim()) return;
+    
+    setTranscript('');
+    setHistory(prev => [...prev, { role: 'user', text: command }]);
+    setIsProcessing(true);
+
+    // Define tool declarations for Jarvis
+    const tools: FunctionDeclaration[] = [
+      {
+        name: "addProduct",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            name: { type: Type.STRING, description: "Name of the product in Bengali or English" },
+            price: { type: Type.NUMBER, description: "Price of the product" },
+            stock: { type: Type.NUMBER, description: "Initial stock quantity" },
+            category: { type: Type.STRING, description: "Category name" }
+          },
+          required: ["name", "price", "stock"]
+        }
+      },
+      {
+        name: "checkInventory",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            productName: { type: Type.STRING, description: "Name of the product to check" }
+          }
+        }
+      },
+      {
+        name: "addSale",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            items: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  productName: { type: Type.STRING, description: "Name of the product being sold" },
+                  quantity: { type: Type.NUMBER, description: "Quantity sold" }
+                }
+              }
+            },
+            customerPhone: { type: Type.STRING, description: "Optional customer phone number" }
+          }
+        }
+      },
+      {
+        name: "addCustomer",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            name: { type: Type.STRING, description: "Customer Name" },
+            phone: { type: Type.STRING, description: "Customer Phone Number" },
+            address: { type: Type.STRING, description: "Customer Address" }
+          },
+          required: ["name", "phone"]
+        }
+      },
+      {
+        name: "checkCustomer",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            phoneOrName: { type: Type.STRING, description: "Customer Name or Phone Number to search for" }
+          }
+        }
+      },
+      {
+        name: "removeProduct",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            productName: { type: Type.STRING, description: "Name of the product to remove" }
+          },
+          required: ["productName"]
+        }
+      },
+      {
+        name: "getSystemSummary",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {}
+        }
+      },
+      {
+        name: "updateProduct",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            productName: { type: Type.STRING, description: "Name of the product to update" },
+            price: { type: Type.NUMBER, description: "New price of the product" },
+            stock: { type: Type.NUMBER, description: "New stock amount" }
+          },
+          required: ["productName"]
+        }
+      },
+      {
+        name: "removeCustomer",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            phoneOrName: { type: Type.STRING, description: "Customer Name or Phone to remove" }
+          },
+          required: ["phoneOrName"]
+        }
+      },
+      {
+        name: "prepareInvoice",
+        description: "Open Point of Sale and add items to cart",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            items: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  productName: { type: Type.STRING },
+                  quantity: { type: Type.NUMBER }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        name: "navigateApp",
+        description: "Navigate to a specific part of the app (dashboard, inventory, sales, customers, reports, settings, pos)",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            destination: { type: Type.STRING }
+          },
+          required: ["destination"]
+        }
+      },
+      {
+        name: "updateSettings",
+        description: "Modify the shop settings (e.g. language, vat rate, currency, shop name)",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            shopName: { type: Type.STRING, description: "Shop name" },
+            currency: { type: Type.STRING, description: "Currency symbol, e.g. ৳ or $" },
+            taxRate: { type: Type.NUMBER, description: "Tax / VAT rate percentage" }
+          }
+        }
+      },
+      {
+        name: "sendCustomerReminder",
+        description: "Send a due payment reminder to a customer via WhatsApp",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            phoneOrName: { type: Type.STRING, description: "Customer Name or Phone to send reminder to" }
+          },
+          required: ["phoneOrName"]
+        }
+      },
+      {
+        name: "checkLowStock",
+        description: "Get a list of products that are currently out of stock or have low stock",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {}
+        }
+      },
+      {
+        name: "checkCustomerDue",
+        description: "Check the total unpaid due amount of a specific customer",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            phoneOrName: { type: Type.STRING, description: "Customer Name or Phone" }
+          },
+          required: ["phoneOrName"]
+        }
+      },
+      {
+        name: "createDirectSale",
+        description: "Create a completed sale directly without going to Point of Sale. Very important for immediate sales. Use this when user says exactly what is sold.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            items: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  productName: { type: Type.STRING },
+                  quantity: { type: Type.NUMBER }
+                }
+              }
+            },
+            customerPhoneOrName: { type: Type.STRING, description: "Customer Phone or Name if existing customer. Empty if walk-in / retail." },
+            paidAmount: { type: Type.NUMBER, description: "Amount paid by customer. If missing, assume full payment for retail." },
+            printInvoice: { type: Type.BOOLEAN, description: "Whether to print the invoice immediately." },
+            sendWhatsApp: { type: Type.BOOLEAN, description: "Whether to send the invoice via WhatsApp to the customer." }
+          },
+          required: ["items"]
+        }
+      },
+      {
+        name: "printLatestInvoice",
+        description: "Print the latest invoice / receipt",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {}
+        }
+      },
+      {
+        name: "sendLatestInvoiceWhatsApp",
+        description: "Send the most recently created invoice to the customer via WhatsApp. Use this when the user says 'Yes' after being asked if they want to send it.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {}
+        }
+      },
+      {
+        name: "getSalesSummary",
+        description: "Get a summary of sales for a specific period (today, week, month)",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            period: { type: Type.STRING, enum: ["today", "week", "month"], description: "The time period for sales summary" }
+          },
+          required: ["period"]
+        }
+      },
+      {
+        name: "getCustomerDetails",
+        description: "Get detailed history and balance for a specific customer",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            phoneOrName: { type: Type.STRING, description: "Customer name or phone" }
+          },
+          required: ["phoneOrName"]
+        }
+      }
+    ];
+
+    try {
+      console.log("Processing command:", command, "Language:", language, "Voice Gender:", voiceGender);
+      const apiKey = process.env.GEMINI_API_KEY;
+      
+      // Local fallback for common commands if API is missing or fails
+      const lowerCmd = command.toLowerCase();
+      if (!apiKey || lowerCmd.includes("সারাংশ") || lowerCmd.includes("summary") || lowerCmd.includes("আয়") || lowerCmd.includes("revenue")) {
+        if (lowerCmd.includes("সারাংশ") || lowerCmd.includes("summary") || lowerCmd.includes("আয়") || lowerCmd.includes("revenue") || lowerCmd.includes("হিসাব")) {
+            const todaySales = systemData.sales.filter(s => new Date(s.date).toDateString() === new Date().toDateString());
+            const totalRevenue = todaySales.reduce((acc, s) => acc + (s.totalAmount || 0), 0);
+            const feedback = language === 'bn'
+              ? `আজকের সারাংশ: মোট ${todaySales.length} টি সেল হয়েছে। মোট আয় হয়েছে ${totalRevenue.toLocaleString()} টাকা।`
+              : `Today's summary: Total ${todaySales.length} sales. Total revenue is ${totalRevenue.toLocaleString()}.`;
+            setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+            speak(feedback);
+            setIsProcessing(false);
+            return;
+        }
+      }
+
+      if (!apiKey) {
+         throw new Error("API Key is missing.");
+      }
+
+      const ai = new GoogleGenAI({ apiKey }); 
+      
+      const response = await ai.models.generateContent({
+        model: "gemini-flash-latest",
+        contents: command,
+        config: {
+          systemInstruction: `You are the AI Assistant for Bismillah Store Management System. 
+
+          # CRITICAL LANGUAGE PROTOCOL (STRICT):
+          - CURRENT LANGUAGE SETTING: ${language === 'bn' ? 'BENGALI (বাংলা)' : 'ENGLISH'}.
+          - If the setting is 'bn', you MUST ONLY output text in BENGALI (বাংলা) script.
+          - USE CONVERSATIONAL, NATURAL BENGALI (একদম সাধারণ মানুষের মত চলিত ভাষায় কথা বলবেন). 
+          - Talk just like a real human assistant. Use a very friendly, natural tone. 
+          - Keep your sentences short, simple, and clear so the text-to-speech engine sounds natural. Do not use overly complex or formal words (যেমন 'অতঃপর', 'সংযোজন', 'বিধায়' ইত্যাদি বাদ দিয়ে 'এরপর', 'অ্যাড', 'তাই' ব্যবহার করুন).
+          - EVEN IF the user speaks to you in English, if the setting is 'bn', you MUST respond in BENGALI.
+          - ABSOLUTELY NO English sentences or phrases (except technical product names where no clear Bengali exists).
+          - Use polite but friendly Bengali (আপনি/আপনার).
+          - If the setting is 'en', you MUST ONLY output text in ENGLISH.
+          
+          # PERSONALITY & ROLE:
+          Your voice matches a ${voiceGender} persona. You are extremely helpful, quick, and conversational.
+          
+          # DIRECT SALE PROTOCOL:
+          If the user tells you to add a sale using specific products (e.g., '10 kg flour, 15 kg potatoes for customer Habib, paid 500'):
+          1. Check the item names and try to map them to your knowledge.
+          2. ALWAYS use the 'createDirectSale' tool immediately. Pass the extracted items, customerName if available, and paidAmount if stated.
+          3. DO NOT use 'prepareInvoice' / 'addToPOS' unless the user explicitly wants to go to the Point of Sale screen manually. For direct quick sales, use 'createDirectSale'.
+          4. When using 'createDirectSale', you don't need to ask for confirmation if the user has provided items. Just execute it.
+          5. If the user asks whether to send a WhatsApp message, DO NOT use 'sendLatestInvoiceWhatsApp' right away. The code response will ask the user.
+          6. If you previously completed a sale, and the user responds with "Yes" or "হ্যাঁ" (affirming they want to send it to WhatsApp), THEN call 'sendLatestInvoiceWhatsApp'.
+          
+          # SALES & HISTORY PROTOCOL:
+          - If the user asks for sales summary (today, week, month), use 'getSalesSummary'.
+          - If the user asks about a specific customer's history, dues, or products they bought before, use 'getCustomerDetails'.
+          
+          # CONTEXT:
+          - Inventory Count: ${systemData.items.length} products.
+          - Sales Today: ${systemData.sales.filter(s => new Date(s.date).toDateString() === new Date().toDateString()).length} entries.
+          
+          # VOICE CAPABILITIES:
+          - If the user asks about uploading their own voice, explain that currently you use system voices (Standard Web Speech API) and don't support custom voice cloning or upload yet.
+          - I have enabled continuous listening for you. You don't need to ask the user to click. You can talk to them like a real person.
+          
+          # FUNCTION USAGE:
+          You can add/update/remove products, manage customers, generate pos invoices, send reminders, navigate panels, print invoices, send whatsapp invoices, check low stock products, check customer due amounts, query summaries, and update settings.
+          Execute tools when requested/implied and confirm the action in the CURRENT LANGUAGE (${language === 'bn' ? 'বাংলা' : 'English'}).`,
+          tools: [{ functionDeclarations: tools }]
+        }
+      });
+
+      const text = response.text || "";
+      const fCalls = response.functionCalls;
+      let accumulatedSpeech = "";
+
+      if (fCalls) {
+        for (const call of fCalls) {
+          if (call.name === 'addProduct') {
+            const res = await actions.addItem({
+              name: call.args.name,
+              price: Number(call.args.price),
+              stock: Number(call.args.stock),
+              category: call.args.category || 'General',
+              id: `p-${Date.now()}`
+            });
+            const feedback = language === 'bn' 
+              ? `ঠিক আছে, আমি ${call.args.name} প্রোডাক্টটি যোগ করেছি। এর দাম ${call.args.price} টাকা।`
+              : `Okay, I've added the product ${call.args.name} with price ${call.args.price}.`;
+            setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+            accumulatedSpeech += feedback + " ";
+          } else if (call.name === 'checkInventory') {
+            const productName = String(call.args.productName || '');
+            const item = systemData.items.find(i => 
+              i.name.toLowerCase().includes(productName.toLowerCase())
+            );
+            const feedback = item 
+              ? (language === 'bn' 
+                  ? `${item.name} এর বর্তমান স্টক আছে ${item.stock} টি।`
+                  : `${item.name} currently has ${item.stock} in stock.`)
+              : (language === 'bn' 
+                  ? `দুঃখিত, আমি "${productName}" নামের কোনো প্রোডাক্ট খুঁজে পাইনি।` 
+                  : `Sorry, I could not find product "${productName}".`);
+            setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+            accumulatedSpeech += feedback + " ";
+          } else if (call.name === 'addSale') {
+            const items = (call.args.items as any[]) || [];
+            if (items.length > 0) {
+              actions.addToPOS(items);
+              const feedback = language === 'bn' ? `পয়েন্ট অফ সেলে আপনার জন্য আইটেমগুলো যোগ করা হয়েছে।` : `I've opened the POS and added these items for you.`;
+              setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+              accumulatedSpeech += feedback + " ";
+              onClose(); 
+            }
+          } else if (call.name === 'addCustomer') {
+             await actions.addCustomer({
+               name: String(call.args.name),
+               phone: String(call.args.phone),
+               address: call.args.address ? String(call.args.address) : '',
+               id: `c-${Date.now()}`,
+               initialDue: 0,
+               createdAt: new Date().toISOString()
+             });
+             const feedback = language === 'bn' 
+              ? `কাস্টমার ${call.args.name} কে সিস্টেমে যোগ করা হয়েছে।`
+              : `Customer ${call.args.name} has been added to the system.`;
+             setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+             accumulatedSpeech += feedback + " ";
+          } else if (call.name === 'checkCustomer') {
+             const query = String(call.args.phoneOrName || '').toLowerCase();
+             const c = systemData.customers.find((c: any) => 
+                c.phone.toLowerCase().includes(query) || c.name.toLowerCase().includes(query)
+             );
+             if (c) {
+               const feedback = language === 'bn'
+                 ? `হ্যাঁ, কাস্টমার সিস্টেমে আছে। নাম: ${c.name}, ফোন: ${c.phone}, ঠিকানা: ${c.address || 'দেওয়া হয়নি'}।`
+                 : `Yes, customer found. Name: ${c.name}, Phone: ${c.phone}, Address: ${c.address || 'Not provided'}.`;
+               setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+               accumulatedSpeech += feedback + " ";
+             } else {
+               const feedback = language === 'bn' ? `দুঃখিত, কোনো কাস্টমার খুঁজে পাইনি।` : `Sorry, I couldn't find that customer.`;
+               setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+               accumulatedSpeech += feedback + " ";
+             }
+          } else if (call.name === 'removeProduct') {
+             const productName = String(call.args.productName || '');
+             const item = systemData.items.find(i => 
+               i.name.toLowerCase().includes(productName.toLowerCase())
+             );
+             if (item) {
+               await actions.removeItem(item.id);
+               const feedback = language === 'bn' 
+                 ? `আমি ${item.name} প্রোডাক্টটি মুছে ফেলেছি।`
+                 : `I have removed the product ${item.name}.`;
+               setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+               accumulatedSpeech += feedback + " ";
+             } else {
+               const feedback = language === 'bn' 
+                 ? `দুঃখিত, আমি "${productName}" নামের কোনো প্রোডাক্ট খুঁজে পাইনি।`
+                 : `Sorry, I couldn't find the product "${productName}".`;
+               setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+               accumulatedSpeech += feedback + " ";
+             }
+          } else if (call.name === 'getSystemSummary') {
+            const todaySales = systemData.sales.filter(s => new Date(s.date).toDateString() === new Date().toDateString());
+            const totalRevenue = todaySales.reduce((acc, s) => acc + (s.totalAmount || 0), 0);
+            const feedback = language === 'bn'
+              ? `আজকের সারাংশ: মোট ${todaySales.length} টি সেল হয়েছে। মোট আয় হয়েছে ${totalRevenue.toLocaleString()} টাকা। ইনভেন্টরিতে এখন ${systemData.items.length} টি প্রোডাক্ট আছে।`
+              : `Today's summary: Total ${todaySales.length} sales. Total revenue is ${totalRevenue.toLocaleString()}. There are ${systemData.items.length} products in inventory.`;
+            setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+            accumulatedSpeech += feedback + " ";
+          } else if (call.name === 'updateProduct') {
+            const productName = String(call.args.productName || '');
+            const item = systemData.items.find(i => 
+              i.name.toLowerCase().includes(productName.toLowerCase())
+            );
+            if (item) {
+              const updates: any = {};
+              if (call.args.price !== undefined) updates.price = Number(call.args.price);
+              if (call.args.stock !== undefined) updates.stock = Number(call.args.stock);
+              if (Object.keys(updates).length > 0) {
+                 try {
+                   await updateDoc(doc(db, "products", item.id), updates);
+                   const feedback = language === 'bn' ? `${item.name} আপডেট করা হয়েছে।` : `${item.name} has been updated.`;
+                   setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+                   accumulatedSpeech += feedback + " ";
+                 } catch (e) {
+                   handleFirestoreError(e, OperationType.UPDATE, `products/${item.id}`);
+                 }
+              }
+            } else {
+               const feedback = language === 'bn' ? `দুঃখিত, কোনো প্রোডাক্ট খুঁজে পাইনি।` : `Sorry, I couldn't find the product.`;
+               setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+               accumulatedSpeech += feedback + " ";
+            }
+          } else if (call.name === 'removeCustomer') {
+            const query = String(call.args.phoneOrName || '').toLowerCase();
+            const c = systemData.customers.find((c: any) => 
+               c.phone.toLowerCase().includes(query) || c.name.toLowerCase().includes(query)
+            );
+            if (c) {
+               try {
+                 await deleteDoc(doc(db, "customers", c.id));
+                 const feedback = language === 'bn' ? `${c.name} কাস্টমার মুছে ফেলা হয়েছে।` : `Customer ${c.name} has been removed.`;
+                 setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+                 accumulatedSpeech += feedback + " ";
+               } catch (e) {
+                 handleFirestoreError(e, OperationType.DELETE, `customers/${c.id}`);
+               }
+            } else {
+               const feedback = language === 'bn' ? `দুঃখিত, কোনো কাস্টমার খুঁজে পাইনি।` : `Sorry, I couldn't find that customer.`;
+               setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+               accumulatedSpeech += feedback + " ";
+            }
+          } else if (call.name === 'prepareInvoice') {
+            const items = (call.args.items as any[]) || [];
+            if (items.length > 0) {
+              actions.addToPOS(items);
+              const feedback = language === 'bn' ? `পয়েন্ট অফ সেলে আপনার জন্য আইটেমগুলো যোগ করা হয়েছে।` : `I've opened the POS and added these items for you.`;
+              setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+              accumulatedSpeech += feedback + " ";
+              onClose(); // Hide Jarvis so user can see POS
+            }
+          } else if (call.name === 'navigateApp') {
+             const dest = String(call.args.destination || '').toLowerCase();
+             let targetTab = 'dashboard';
+             if (dest.includes('inventory') || dest.includes('stock') || dest.includes('product')) targetTab = 'inventory';
+             else if (dest.includes('sale') || dest.includes('pos') || dest.includes('invoice') || dest.includes('point')) targetTab = 'pos';
+             else if (dest.includes('customer') || dest.includes('remind')) targetTab = 'customers';
+             else if (dest.includes('report') || dest.includes('closing')) targetTab = 'reports';
+             else if (dest.includes('setting') || dest.includes('admin')) targetTab = 'settings';
+             else targetTab = 'dashboard';
+
+             actions.navigate(targetTab);
+             const feedback = language === 'bn' ? `আমি আপনাকে সেই প্যানেলে নিয়ে যাচ্ছি।` : `I am navigating to that panel.`;
+             setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+             accumulatedSpeech += feedback + " ";
+             onClose(); // Hide Jarvis so user can see new screen
+          } else if (call.name === 'updateSettings') {
+             const updates: any = {};
+             if (call.args.shopName !== undefined) updates.shopName = call.args.shopName;
+             if (call.args.currency !== undefined) updates.currency = call.args.currency;
+             if (call.args.taxRate !== undefined) updates.taxRate = call.args.taxRate;
+             if (Object.keys(updates).length > 0) {
+                 try {
+                   await updateDoc(doc(db, "settings", shopId), updates);
+                   const feedback = language === 'bn' ? `সেটিংস সফলভাবে সেভ হয়েছে।` : `Settings have been updated.`;
+                   setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+                   accumulatedSpeech += feedback + " ";
+                 } catch (e) {
+                   handleFirestoreError(e, OperationType.UPDATE, `settings/${shopId}`);
+                 }
+             } else {
+                 actions.navigate('settings');
+                 onClose();
+             }
+          } else if (call.name === 'sendCustomerReminder') {
+             const query = String(call.args.phoneOrName || '').toLowerCase();
+             const c = systemData.customers.find((c: any) => 
+                c.phone.toLowerCase().includes(query) || c.name.toLowerCase().includes(query)
+             );
+             if (c) {
+                actions.sendReminder(c);
+                const feedback = language === 'bn' ? `${c.name} কে রিমাইন্ডার পাঠানো হচ্ছে।` : `Sending reminder to ${c.name}.`;
+                setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+                accumulatedSpeech += feedback + " ";
+             } else {
+                const feedback = language === 'bn' ? `দুঃখিত, কাস্টমার খুঁজে পাইনি।` : `Sorry, I couldn't find the customer.`;
+                setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+                accumulatedSpeech += feedback + " ";
+             }
+          } else if (call.name === 'checkLowStock') {
+             const lowStockItems = systemData.items.filter((i: any) => i.stock <= 5);
+             let feedback = "";
+             if (lowStockItems.length === 0) {
+                feedback = language === 'bn' ? `বর্তমানে কোনো প্রোডাক্টের স্টক কম নেই। সব কিছু ঠিক আছে।` : `There are no low stock products at the moment.`;
+             } else {
+                feedback = language === 'bn' 
+                   ? `আপনার ${lowStockItems.length} টি প্রোডাক্টের স্টক কম। এর মধ্যে রয়েছে ${lowStockItems.slice(0,3).map((i:any)=>i.name).join(', ')}${lowStockItems.length > 3 ? ' সহ আরও কিছু' : ''}।` 
+                   : `You have ${lowStockItems.length} products with low stock, including ${lowStockItems.slice(0,3).map((i:any)=>i.name).join(', ')}.`;
+             }
+             setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+             accumulatedSpeech += feedback + " ";
+          } else if (call.name === 'checkCustomerDue') {
+             const query = String(call.args.phoneOrName || '').toLowerCase();
+             const c = systemData.customers.find((c: any) => 
+                c.phone.toLowerCase().includes(query) || c.name.toLowerCase().includes(query)
+             );
+             if (c) {
+                const totalDue = c.totalUnpaid || 0;
+                let feedback = "";
+                if (totalDue > 0) {
+                   feedback = language === 'bn' ? `${c.name} এর কাছে আপনার মোট ${totalDue} টাকা পাওনা আছে।` : `${c.name} has a total due of ${totalDue}.`;
+                } else {
+                   feedback = language === 'bn' ? `${c.name} এর কোনো বকেয়া নেই।` : `${c.name} does not have any dues.`;
+                }
+                setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+                accumulatedSpeech += feedback + " ";
+             } else {
+                const feedback = language === 'bn' ? `আমি এই নামের কোনো কাস্টমারকে খুঁজে পাইনি।` : `I couldn't find a customer with that info.`;
+                setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+                accumulatedSpeech += feedback + " ";
+             }
+          } else if (call.name === 'createDirectSale') {
+             try {
+                const res = await actions.createDirectSale(call.args);
+                let feedback = "";
+                if (res.success) {
+                   feedback = language === 'bn' 
+                      ? `সেল সম্পন্ন হয়েছে। মোট বিল ${res.total} টাকা, জমা ${res.paid} টাকা, বকেয়া ${res.due} টাকা। ${call.args.sendWhatsApp ? 'হোয়াটসঅ্যাপ মেসেজ পাঠানো হচ্ছে।' : 'আপনি কি ইনভয়েস হোয়াটসঅ্যাপে পাঠাতে চান?'}`
+                      : `Sale completed. Total ${res.total}, Paid ${res.paid}, Due ${res.due}. ${call.args.sendWhatsApp ? 'Sending WhatsApp.' : 'Do you want to send on WhatsApp?'}`;
+                } else {
+                   feedback = language === 'bn' ? `দুঃখিত, সেল সম্পন্ন করতে সমস্যা হয়েছে: ${res.error}` : `Failed to complete sale: ${res.error}`;
+                }
+                setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+                accumulatedSpeech += feedback + " ";
+             } catch(e: any) {
+                const feedback = language === 'bn' ? `দুঃখিত, একটি সমস্যা হয়েছে।` : `Sorry, there was an error.`;
+                setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+                accumulatedSpeech += feedback + " ";
+             }
+          } else if (call.name === 'printLatestInvoice') {
+             actions.printLatestInvoice();
+             const feedback = language === 'bn' ? `শেষ ইনভয়েস প্রিন্ট করা হচ্ছে।` : `Printing the latest invoice.`;
+             setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+             accumulatedSpeech += feedback + " ";
+          } else if (call.name === 'sendLatestInvoiceWhatsApp') {
+             if (actions.sendLatestInvoiceWhatsApp) {
+               actions.sendLatestInvoiceWhatsApp();
+               const feedback = language === 'bn' ? `শেষ ইনভয়েসটি হোয়াটসঅ্যাপে পাঠানো হচ্ছে।` : `Sending the latest invoice via WhatsApp.`;
+               setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+               accumulatedSpeech += feedback + " ";
+             } else {
+               const feedback = language === 'bn' ? `দুঃখিত, হোয়াটসঅ্যাপে পাঠানোর সুবিধাটি এখন কাজ করছে না।` : `Sorry, sending via WhatsApp is currently unavailable.`;
+               setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+               accumulatedSpeech += feedback + " ";
+             }
+          } else if (call.name === 'getSalesSummary') {
+             const period = call.args.period;
+             let filteredSales = [];
+             const now = new Date();
+             if (period === 'today') {
+                filteredSales = systemData.sales.filter(s => new Date(s.date).toDateString() === now.toDateString());
+             } else if (period === 'week') {
+                const lastWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                filteredSales = systemData.sales.filter(s => new Date(s.date) >= lastWeek);
+             } else {
+                const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+                filteredSales = systemData.sales.filter(s => new Date(s.date) >= lastMonth);
+             }
+             const total = filteredSales.reduce((sum, s) => sum + (s.finalAmount || 0), 0);
+             const count = filteredSales.length;
+             const feedback = language === 'bn' 
+                ? (period === 'today' ? `আজকে` : (period === 'week' ? `এই সপ্তাহে` : `এই মাসে`)) + ` মোট ${count} টি সেল হয়েছে এবং মোট আয় হয়েছে ${total} টাকা।`
+                : `${period.charAt(0).toUpperCase() + period.slice(1)} sales: ${count} entries, totaling ${total} revenue.`;
+             setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+             accumulatedSpeech += feedback + " ";
+          } else if (call.name === 'getCustomerDetails') {
+             const query = String(call.args.phoneOrName || '').toLowerCase();
+             const c = systemData.customers.find((c: any) => 
+                c.phone.toLowerCase().includes(query) || c.name.toLowerCase().includes(query)
+             );
+             if (c) {
+                const customerSales = systemData.sales.filter(s => s.customerId === c.id);
+                const totalSpent = customerSales.reduce((sum, s) => sum + (s.finalAmount || 0), 0);
+                const due = c.currentDue || 0;
+                const feedback = language === 'bn'
+                  ? `${c.name} এপর্যন্ত মোট ${totalSpent} টাকার শপিং করেছেন। বর্তমানে তার কাছে আপনার ${due} টাকা বকেয়া পাওনা আছে।`
+                  : `${c.name} has spent a total of ${totalSpent}. Currently, there is a ${due} due balance.`;
+                setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+                accumulatedSpeech += feedback + " ";
+             } else {
+                const feedback = language === 'bn' ? `আমি এই নামের কোনো কাস্টমার খুঁজে পাইনি।` : `I couldn't find a customer with that name or phone.`;
+                setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+                accumulatedSpeech += feedback + " ";
+             }
+          }
+        }
+      }
+
+      if (text) {
+        setHistory(prev => [...prev, { role: 'assistant', text }]);
+        accumulatedSpeech += text;
+      }
+      
+      if (accumulatedSpeech.trim()) {
+        const speechStarted = speak(accumulatedSpeech.trim());
+        if (!speechStarted) {
+          // If speech is unavailable/muted, restart mic after a short delay
+          setTimeout(() => {
+            if (!isMuted) {
+              try {
+                recognitionRef.current?.start();
+                setIsListening(true);
+              } catch {}
+            }
+          }, 1500);
+        }
+      } else {
+        // If there is no text response, just restart listening now
+        setTimeout(() => {
+          if (!isMuted) {
+            try {
+              recognitionRef.current?.start();
+              setIsListening(true);
+            } catch {}
+          }
+        }, 1500);
+      }
+    } catch (error) {
+      console.error('Error handling voice command:', error);
+      setErrorCount(prev => prev + 1);
+      
+      const errorMsg = language === 'bn' 
+        ? "দুঃখিত, এখন উত্তর দিতে পারছি না। অনুগ্রহ করে পরে আবার চেষ্টা করুন।" 
+        : "Sorry, I can't respond right now. Please try again later.";
+      
+      setHistory(prev => [...prev, { role: 'assistant', text: errorMsg }]);
+      
+      // Only speak if we haven't failed repeatedly
+      if (errorCount < 2) {
+        speak(errorMsg);
+      } else {
+        // Stop listening to prevent loops
+        setIsListening(false);
+        recognitionRef.current?.stop();
+        setTimeout(() => setErrorCount(0), 10000); // Cool down
+      }
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <div className="w-full h-[calc(100dvh-64px)] lg:h-[calc(100vh-24px)] bg-[#fcfdfe] text-[#1e293b] overflow-hidden lg:rounded-[2.5rem] border border-indigo-100 shadow-2xl relative jarvis-theme flex flex-col" style={{ fontFamily: "'Inter', 'Hind Siliguri', sans-serif" }}>
+      <div className="absolute inset-0 pointer-events-none opacity-[0.03] z-[1]">
+        <div className="w-full h-full" style={{ backgroundImage: 'radial-gradient(#6366f1 1px, transparent 1px)', backgroundSize: '40px 40px' }}></div>
+      </div>
+      <div className="absolute inset-0 pointer-events-none z-[1]" style={{ background: 'linear-gradient(rgba(255, 255, 255, 0) 50%, rgba(0, 0, 0, 0.02) 50%), linear-gradient(90deg, rgba(0, 188, 212, 0.01), rgba(0, 129, 255, 0.01), rgba(0, 188, 212, 0.01))', backgroundSize: '100% 3px, 3px 100%' }}></div>
+
+      <style>
+        {`
+          @import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+          
+          .jarvis-theme {
+              --p-glow: #6366f1;
+              --p-glow-accent: #4f46e5;
+              --panel-bg: rgba(255, 255, 255, 0.9);
+              --panel-border: rgba(99, 102, 241, 0.1);
+              --text-main: #1e293b;
+              --text-muted: #64748b;
+          }
+
+          .orbitron-clean { font-family: 'Inter', sans-serif; letter-spacing: 0.05em; font-weight: 700; }
+          .mono { font-family: 'JetBrains Mono', monospace; }
+          
+          .hud-panel {
+              background: var(--panel-bg);
+              backdrop-filter: blur(16px);
+              border: 1px solid var(--panel-border);
+              border-radius: 24px;
+              position: relative;
+              overflow: hidden;
+              box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+          }
+          
+          .hud-header {
+              font-family: 'Inter', sans-serif;
+              font-size: 0.75rem;
+              font-weight: 700;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+              padding: 14px 20px;
+              background: linear-gradient(90deg, rgba(99, 102, 241, 0.05), transparent);
+              border-bottom: 1px solid var(--panel-border);
+              display: flex;
+              align-items: center;
+              gap: 10px;
+              color: var(--p-glow);
+          }
+
+          .hud-table { width: 100%; font-size: 0.75rem; border-collapse: collapse; }
+          .hud-table th { text-align: left; color: var(--text-muted); font-size: 0.6rem; text-transform: uppercase; padding: 10px 16px; border-bottom: 1px solid var(--panel-border); }
+          .hud-table td { padding: 10px 16px; border-bottom: 1px solid rgba(99, 102, 241, 0.05); color: var(--text-main); }
+          
+          .circle-container {
+              position: relative;
+              width: min(80vw, 500px);
+              height: min(80vw, 500px);
+              display: flex;
+              align-items: center;
+              justify-content: center;
+          }
+
+          .circle-outer-ring {
+              position: absolute;
+              inset: 0;
+              border: 1px solid var(--p-glow);
+              border-radius: 50%;
+              opacity: 0.1;
+              animation: pulse 4s ease-in-out infinite;
+          }
+          
+          .circle-scan {
+              position: absolute;
+              inset: 10px;
+              border: 1px solid var(--p-glow);
+              border-radius: 50%;
+              border-top-color: transparent;
+              border-bottom-color: transparent;
+              animation: spin 10s linear infinite;
+              opacity: 0.1;
+          }
+
+          .circle-core {
+              position: absolute;
+              inset: 28%;
+              background: radial-gradient(circle, rgba(255, 255, 255, 1) 0%, rgba(243, 244, 246, 0.8) 100%);
+              border: 2px solid var(--p-glow);
+              border-radius: 50%;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+              box-shadow: 0 20px 40px rgba(99, 102, 241, 0.1), inset 0 0 20px rgba(99, 102, 241, 0.05);
+              z-index: 10;
+              transition: all 0.5s cubic-bezier(0.19, 1, 0.22, 1);
+              cursor: pointer;
+          }
+
+          .circle-core:hover {
+              transform: scale(1.05);
+              box-shadow: 0 15px 50px rgba(8, 145, 178, 0.2), inset 0 0 30px rgba(8, 145, 178, 0.1);
+              border-color: #0ea5e9;
+          }
+          
+          @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+          @keyframes pulse { 0%, 100% { opacity: 0.1; transform: scale(1); } 50% { opacity: 0.15; transform: scale(1.02); } }
+          
+          @keyframes core-listening {
+              0% { box-shadow: 0 0 40px rgba(8, 145, 178, 0.1); border-color: var(--p-glow); }
+              50% { box-shadow: 0 0 80px rgba(239, 68, 68, 0.3); border-color: #ef4444; }
+              100% { box-shadow: 0 0 40px rgba(8, 145, 178, 0.1); border-color: var(--p-glow); }
+          }
+
+          .is-listening { animation: core-listening 1.5s ease-in-out infinite; }
+
+          .hud-tab.active {
+              background: var(--p-glow);
+              color: white;
+              border-color: var(--p-glow);
+              box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+          }
+          
+          .custom-scroll-jarvis::-webkit-scrollbar { width: 3px; }
+          .custom-scroll-jarvis::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.05); }
+          .custom-scroll-jarvis::-webkit-scrollbar-thumb { background: var(--p-glow); border-radius: 10px; }
+          
+          @media (max-width: 1280px) {
+              .hud-columns { flex-direction: column !important; overflow: hidden; }
+              .hud-column-left, .hud-column-right { width: 100% !important; min-height: 0; }
+              .center-viz { min-height: 200px; order: -1; margin-bottom: 5px; flex-shrink: 0; }
+              .circle-container { width: min(50vw, 200px); height: min(50vw, 200px); }
+          }
+          @media (max-width: 640px) {
+              .hud-panel { border-radius: 16px; }
+              .hud-header { font-size: 0.65rem; padding: 8px 12px; }
+              .center-viz { min-height: 160px; }
+              .circle-container { width: 150px; height: 150px; }
+          }
+        `}
+      </style>
+
+      {/* Top Bar */}
+      <div className="h-[70px] lg:h-[80px] p-4 lg:p-6 flex justify-between items-center relative z-20 border-b border-indigo-100 shrink-0">
+        <div className="flex items-center gap-3 lg:gap-4">
+          <div className="relative">
+            <div className="w-10 h-10 lg:w-12 lg:h-12 border-2 border-indigo-500 rounded-xl flex items-center justify-center rotate-45 group">
+               <div className="w-5 h-5 lg:w-6 lg:h-6 border border-indigo-500 rounded-lg -rotate-45 flex items-center justify-center animate-pulse">
+                  <div className="w-1.5 h-1.5 lg:w-2 lg:h-2 bg-indigo-500 rounded-full"></div>
+               </div>
+            </div>
+            <div className="absolute -inset-1 border border-indigo-300 rounded-xl rotate-45 opacity-20 group-hover:scale-110 transition-transform"></div>
+          </div>
+          <div>
+             <div className="text-2xl lg:text-3xl font-black orbitron-clean tracking-tight text-slate-800 uppercase">AI Assistant</div>
+             <div className="text-[8px] lg:text-[10px] uppercase font-bold tracking-[0.4em] text-indigo-500 opacity-70">BISMILLAH_STORE_AI</div>
+          </div>
+        </div>
+
+        <div className="hidden lg:flex items-center gap-6">
+           <div className="px-10 py-3 border border-indigo-100 rounded-full bg-white relative overflow-hidden group shadow-sm">
+              <div className="orbitron-clean text-xl font-black bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent">
+                 SHOPMASTER <span className="text-slate-700 opacity-90">INTELLIGENCE</span>
+              </div>
+              <div className="absolute bottom-0 left-0 h-[2px] w-full bg-gradient-to-r from-transparent via-indigo-400 to-transparent transform -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></div>
+           </div>
+        </div>
+
+        <div className="flex items-center gap-4">
+          <div className="text-right hidden sm:block">
+            <div className="text-[10px] orbitron-clean font-bold text-indigo-600 opacity-60">SYSTEM_LOAD</div>
+            <div className="text-sm font-black mono text-slate-700">OPTIMAL</div>
+          </div>
+          <button 
+            onClick={() => setIsMuted(!isMuted)}
+            className={`p-3.5 rounded-2xl transition-all duration-300 ${isMuted ? 'bg-red-50 text-red-500 border-red-200' : 'bg-indigo-50 text-indigo-600 border-indigo-200'} border hover:scale-105 active:scale-95 shadow-sm`}
+          >
+            {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 p-3 lg:p-6 overflow-hidden relative flex flex-col min-h-0">
+        <div className="hud-columns flex lg:flex-row flex-col gap-4 lg:gap-6 flex-1 overflow-hidden w-full pb-2 lg:pb-6">
+          
+          {/* LEFT COLUMN */}
+          <div className="hud-column-left flex-1 lg:flex-none w-full lg:w-[320px] flex flex-col gap-4 shrink-0">
+             <div className="hud-panel h-[220px] hidden lg:block">
+               <div className="hud-header"><Bot className="w-3 h-3" /> CLIENT METRICS</div>
+               <div className="overflow-y-auto h-[calc(100%-45px)] custom-scroll-jarvis">
+                 <table className="hud-table">
+                   <thead><tr><th>NAME</th><th className="text-right">CONTACT</th></tr></thead>
+                   <tbody>
+                     {systemData.customers.slice(0, 8).map((c) => (
+                       <tr key={c.id} className="hover:bg-indigo-50/50 transition-colors">
+                         <td className="truncate max-w-[120px] font-bold text-slate-700">{c.name}</td>
+                         <td className="text-right font-mono text-[0.65rem] text-slate-400">{c.phone}</td>
+                       </tr>
+                     ))}
+                   </tbody>
+                 </table>
+               </div>
+             </div>
+
+             <div className="hud-panel p-0 bg-indigo-50/10 flex-1 lg:flex-none lg:h-[auto] border border-indigo-100/50 shadow-inner rounded-3xl overflow-hidden mt-2 lg:mt-0 relative">
+                <div className="absolute inset-0 bg-gradient-to-b from-indigo-500/5 to-transparent pointer-events-none"></div>
+                <div className="hud-header px-5 pt-4 bg-transparent border-none"><ShieldCheck className="w-3 h-3 text-indigo-500" /> ASSISTANT LOG</div>
+                <div className="p-4 flex flex-col h-full lg:h-[320px] lg:flex-1 min-h-0 relative z-10">
+                   <div className="flex-1 overflow-y-auto custom-scroll-jarvis flex flex-col gap-4 pb-4 pr-1">
+                      {history.map((msg, i) => (
+                        <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                          <div className={`p-4 rounded-3xl max-w-[85%] text-xs font-medium leading-relaxed tracking-wide ${
+                            msg.role === 'user' 
+                              ? 'bg-indigo-600 text-white shadow-lg rounded-tr-none' 
+                              : 'bg-white border border-slate-100 text-slate-700 rounded-tl-none shadow-sm'
+                          }`}>
+                              {msg.text}
+                          </div>
+                        </div>
+                      ))}
+                      <div ref={chatEndRef} />
+                   </div>
+                   
+                   <div className="mt-4 relative">
+                      <input 
+                        type="text"
+                        placeholder="Say something to AI Assistant..."
+                        value={transcript}
+                        onChange={e => setTranscript(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && handleVoiceCommand(transcript)}
+                        className="w-full bg-white border border-slate-200 focus:border-indigo-400 rounded-2xl py-4 pl-5 pr-14 text-sm outline-none transition-all placeholder:text-slate-400 text-slate-700 shadow-sm"
+                      />
+                      <button 
+                        onClick={() => handleVoiceCommand(transcript)}
+                        disabled={isProcessing || !transcript.trim()}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 active:scale-95 disabled:opacity-20 transition-all shadow-md"
+                      >
+                        <Send className="w-4 h-4" />
+                      </button>
+                   </div>
+                </div>
+             </div>
+
+             <div className="hud-panel p-6 hidden lg:block">
+                <div className="hud-header">RECENT_TRAFFIC</div>
+                <div className="space-y-4 mt-2">
+                   {recentSales.map((sale, i) => (
+                     <div key={sale.id} className="group cursor-pointer">
+                       <div className="flex justify-between items-center text-[10px] font-bold orbitron-clean">
+                         <span className="text-slate-400">TRANSACTION_{String(i+1).padStart(2, '0')}</span>
+                         <span className="text-indigo-600">৳{sale.totalAmount.toLocaleString()}</span>
+                       </div>
+                       <div className="h-1.5 w-full bg-slate-100 rounded-full mt-2 overflow-hidden">
+                          <div className="h-full bg-indigo-400 w-full transform -translate-x-full animate-[shimmer_2.5s_infinite]"></div>
+                       </div>
+                     </div>
+                   ))}
+                </div>
+             </div>
+          </div>
+
+          {/* CENTER COLUMN */}
+          <div className="center-viz flex-1 relative flex items-center justify-center">
+              <div className="circle-container">
+                  <div className="circle-outer-ring"></div>
+                  <div className="circle-scan"></div>
+                  
+                  <div 
+                    className={`circle-core w-full h-full max-w-[240px] max-h-[240px] ${isListening ? 'is-listening' : ''}`}
+                    onClick={toggleListening}
+                  >
+                     <AnimatePresence mode="wait">
+                       {isProcessing ? (
+                          <motion.div 
+                            key="processing"
+                            initial={{ opacity: 0, scale: 0.8 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.8 }}
+                            className="flex flex-col items-center"
+                          >
+                             <div className="relative w-20 h-20 flex items-center justify-center">
+                                <div className="absolute inset-0 border-4 border-indigo-50 rounded-full"></div>
+                                <div className="absolute inset-0 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                                <div className="w-2.5 h-2.5 bg-indigo-500 rounded-full animate-pulse"></div>
+                             </div>
+                             <div className="mt-5 text-[10px] orbitron-clean font-black text-indigo-700 tracking-[0.2em]">CONNECTED</div>
+                          </motion.div>
+                       ) : (
+                          <motion.div 
+                            key="idle"
+                            initial={{ opacity: 0, scale: 0.8 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.8 }}
+                            className="flex flex-col items-center"
+                          >
+                            <div className="relative mb-4">
+                               <Bot className={`w-14 h-14 transition-all duration-700 ${isListening ? 'text-rose-500' : 'text-indigo-600'} ${isSpeaking ? 'scale-110 drop-shadow-[0_0_10px_rgba(99,102,241,0.3)]' : ''}`} />
+                               {isSpeaking && (
+                                  <div className="absolute -inset-3 border-2 border-indigo-400 rounded-full animate-ping opacity-20"></div>
+                               )}
+                            </div>
+                            <div className="text-3xl orbitron-clean font-black text-slate-800 tracking-tighter uppercase whitespace-nowrap">AI Assistant</div>
+                            <div className="flex gap-1.5 mt-3">
+                               <div className={`h-1.5 w-4 rounded-full ${isListening ? 'bg-rose-500' : 'bg-indigo-100'} animate-pulse`}></div>
+                               <div className={`h-1.5 w-8 rounded-full ${isListening ? 'bg-rose-400' : 'bg-indigo-300'} animate-pulse [animation-delay:200ms]`}></div>
+                               <div className={`h-1.5 w-4 rounded-full ${isListening ? 'bg-rose-500' : 'bg-indigo-100'} animate-pulse [animation-delay:400ms]`}></div>
+                            </div>
+                          </motion.div>
+                       )}
+                     </AnimatePresence>
+                  </div>
+              </div>
+          </div>
+
+          {/* RIGHT COLUMN */}
+          <div className="hud-column-right hidden lg:flex w-full lg:w-[340px] flex-col gap-4 shrink-0">
+             <div className="hud-panel p-0">
+               <div className="hud-header">SYSTEM_INVENTORY</div>
+               <div className="p-6 space-y-5 max-h-[280px] overflow-y-auto custom-scroll-jarvis">
+                  {systemData.items.slice(0, 5).map(item => (
+                    <div key={item.id} className="flex items-center gap-5 group">
+                       <div className="w-12 h-12 rounded-2xl bg-indigo-50/50 border border-indigo-100 flex items-center justify-center group-hover:border-indigo-300 transition-all">
+                          <span className="font-black text-indigo-600 text-sm">{item.name.charAt(0)}</span>
+                       </div>
+                       <div className="flex-1 min-w-0">
+                          <div className="flex justify-between items-center mb-2">
+                             <span className="text-xs font-bold text-slate-700 truncate">{item.name}</span>
+                             <span className="text-[11px] mono font-bold text-indigo-600">{item.stock}</span>
+                          </div>
+                          <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                             <div 
+                               className={`h-full rounded-full transition-all duration-1000 ${
+                                 item.stock < 10 ? 'bg-gradient-to-r from-rose-500 to-rose-400' : 'bg-gradient-to-r from-indigo-500 to-indigo-400'
+                               }`}
+                               style={{ width: `${Math.min(100, item.stock)}%` }}
+                             />
+                          </div>
+                       </div>
+                    </div>
+                  ))}
+               </div>
+             </div>
+
+             <div className="hud-panel flex-1 flex flex-col min-h-0 bg-slate-50/30">
+                <div className="hud-header">ANALYTICS_CORE</div>
+                <div className="p-6 flex-1 flex flex-col overflow-hidden">
+                   <div className="flex gap-2.5 mb-6">
+                      <button className="flex-1 hud-tab active">SUMMARY</button>
+                      <button className="flex-1 hud-tab">TRENDS</button>
+                   </div>
+
+                   <div className="grid grid-cols-1 gap-4 mb-6">
+                      <div className="bg-white p-5 rounded-2xl border border-indigo-50 relative overflow-hidden group shadow-sm">
+                         <div className="text-[10px] orbitron-clean font-bold text-indigo-400 mb-1.5 uppercase">TODAY_REVENUE</div>
+                         <div className="text-3xl font-black mono text-slate-800">৳{todayRevenue.toLocaleString()}</div>
+                      </div>
+                   </div>
+
+                   <div className="flex-1 flex flex-col min-h-0">
+                      <div className="text-[10px] orbitron-clean font-bold text-slate-400 mb-4 tracking-widest uppercase">NETWORK_LOAD</div>
+                      <div className="flex-1 bg-white rounded-2xl border border-indigo-50 relative p-5 overflow-hidden shadow-[inset_0_2px_10px_rgba(0,0,0,0.01)]">
+                         <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="absolute inset-0 w-full h-full opacity-[0.07]">
+                            <path d="M0,40 L0,30 L20,10 L40,25 L60,5 L80,20 L100,5 L100,40 Z" fill="url(#indigo-grad)" />
+                            <polyline fill="none" stroke="#6366f1" strokeWidth="1.5" points="0,30 20,10 40,25 60,5 80,20 100,5" strokeLinecap="round" strokeLinejoin="round" />
+                            <defs>
+                               <linearGradient id="indigo-grad" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="0%" stopColor="#6366f1" stopOpacity="0.5" />
+                                  <stop offset="100%" stopColor="#6366f1" stopOpacity="0" />
+                               </linearGradient>
+                            </defs>
+                         </svg>
+                         <div className="relative z-10 flex flex-col justify-between h-full font-mono text-[10px] font-bold text-slate-500">
+                            <div className="flex justify-between"><span className="text-indigo-500 font-bold">+8.1 TB/S</span><span>STABLE</span></div>
+                            <div className="mt-auto flex justify-between"><span>UPTIME: 99.9%</span><span className="text-indigo-500">SECURE</span></div>
+                         </div>
+                      </div>
+                   </div>
+
+                   <div className="mt-6 p-5 bg-gradient-to-r from-indigo-600 to-indigo-800 rounded-2xl text-white shadow-xl overflow-hidden relative group">
+                      <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                      <div className="flex items-center justify-between mb-2 relative z-10">
+                          <ShieldCheck className="w-5 h-5 text-indigo-200" />
+                          <span className="text-[10px] orbitron-clean font-black tracking-widest opacity-80">STABILITY_LINK</span>
+                      </div>
+                      <div className="text-3xl font-black mono relative z-10">HIGH</div>
+                   </div>
+                </div>
+             </div>
+          </div>
+        </div>
+
+      {/* Bottom Footer Info (GAUG Area) */}
+      <div className="h-[70px] px-6 pb-6 flex gap-4 shrink-0 mt-auto">
+         <div className="flex-1 hud-panel border-indigo-50 flex items-center px-6">
+            <div className="flex-1">
+               <div className="text-[9px] font-bold text-slate-400 mb-2 uppercase">DATA_INTEGRITY</div>
+               <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden border border-slate-100">
+                  <div className="bg-gradient-to-r from-indigo-500 to-indigo-700 w-[98%] h-full"></div>
+               </div>
+            </div>
+         </div>
+         <button 
+           onClick={onClose}
+           className="px-8 hud-panel flex items-center justify-center group overflow-hidden border-indigo-100 hover:border-rose-300 transition-all"
+         >
+            <X className="w-5 h-5 text-indigo-400 group-hover:text-rose-500 transition-colors" />
+            <div className="absolute inset-0 bg-rose-50 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+         </button>
+      </div>
+      </div>
+    </div>
+  );
+};

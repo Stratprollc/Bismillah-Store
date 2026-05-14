@@ -1,0 +1,55 @@
+1965:    return () => window.removeEventListener('error', handleError);
+1969:    return (
+2026:    return () => window.removeEventListener('click', handleClick);
+2086:  return (
+2662:    return (item.entityType || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+2666:  return (
+2742:  return (
+2850:    return () => window.removeEventListener('resize', handleResize);
+2863:    return () => {
+2876:    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+2897:    return () => window.removeEventListener('keyup', handleKeyUp);
+3080:    return () => unsubscribe();
+3101:    return () => clearInterval(interval);
+3114:    return () => unsubShops();
+3275:      return () => clearTimeout(timer);
+3405:    return () => {
+4201:    return (
+4215:    return (
+4417:  return (
+5079:  return (
+5109:      return () => clearTimeout(timer);
+5113:  return (
+5279:  return (
+5343:              return (
+5482:  return (
+5513:  return (
+5548:                    return (
+5731:  return (
+5881:  return (
+6008:  return (
+6029:    return () => window.removeEventListener('click', handleClick);
+6070:  return (
+6481:  return (
+6606:                return (
+6710:  return (
+6758:  return (
+6952:  return (
+7253:  return (
+7649:  return (
+7925:  return (
+8093:  return (
+8152:  return (
+8512:  return (
+9250:    return () => clearTimeout(timer);
+9327:    return () => window.removeEventListener('click', handleClick);
+9771:  return (
+10156:                 return (
+10829:  return (
+11489:  return (
+12266:  return (
+12741:                        return (
+12751:                      return (
+12808:                        return (
+12818:                      return (
+13131:  return (

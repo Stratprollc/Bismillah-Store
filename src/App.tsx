@@ -8,6 +8,7 @@ import { parsePosVoiceCommandAI } from './utils/aiVoiceParser';
 import { addToSyncQueue, getSyncQueue, removeFromSyncQueue } from './utils/offlineDb';
 import { 
   LayoutDashboard, 
+  Bot,
   ChevronLeft,
   Package, 
   ShoppingCart, 
@@ -108,8 +109,8 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import Papa from 'papaparse';
 import { CategoryManagement } from './components/CategoryManagement';
+import { JarvisAI } from './components/JarvisAI';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI } from "@google/genai";
 import { 
   db, 
   auth, 
@@ -195,6 +196,8 @@ interface ShopSettings {
   printLanguage: 'en' | 'bn' | 'ar';
   systemLanguage: 'en' | 'bn' | 'ar';
   currencySymbol: string;
+  jarvisLanguage: 'en' | 'bn';
+  jarvisVoiceGender: 'male' | 'female';
 }
 
 const PRINT_TRANSLATIONS = {
@@ -471,8 +474,10 @@ const SYSTEM_TRANSLATIONS = {
     downloadAndroid: 'Download Android App',
     downloadDesktop: 'Download Desktop App',
     downloadTab: 'Download',
+    jarvisAI: 'AI Assistant',
   },
   bn: {
+    jarvisAI: 'এআই অ্যাসিস্ট্যান্ট',
 
     dashboard: 'ড্যাশবোর্ড',
     inventory: 'ইনভেন্টরি',
@@ -1647,7 +1652,7 @@ Paid Amount: ${settings.currencySymbol} ${sale.paidAmount}`;
 Do NOT include any markdown blocks, JSON format, or preamble like "Here is the message". Return ONLY the actual WhatsApp message text.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-flash-latest",
       contents: prompt,
     });
 
@@ -1921,7 +1926,7 @@ async function parseNewProductVoiceCommand(rawText: string, categories: string[]
     `;
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-flash-latest",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -1993,7 +1998,9 @@ function SettingsPanel({
   products = [],
   sales = [],
   customers = [],
-  expenses = []
+  expenses = [],
+  deferredPrompt,
+  onInstallPWA
 }: { 
   settings: ShopSettings, 
   onSaveSettings: (s: ShopSettings) => void, 
@@ -2004,7 +2011,9 @@ function SettingsPanel({
   products?: Product[],
   sales?: Sale[],
   customers?: Customer[],
-  expenses?: Expense[]
+  expenses?: Expense[],
+  deferredPrompt: any,
+  onInstallPWA: () => void
 }) {
   const systemLang = settings.systemLanguage || 'bn';
   const st = (key: keyof typeof SYSTEM_TRANSLATIONS['en']) => (SYSTEM_TRANSLATIONS[systemLang] as any)[key] || (SYSTEM_TRANSLATIONS['en'] as any)[key];
@@ -2060,6 +2069,8 @@ function SettingsPanel({
       printLanguage: formData.get('printLanguage') as 'en' | 'bn' | 'ar',
       systemLanguage: formData.get('systemLanguage') as 'en' | 'bn' | 'ar',
       currencySymbol: formData.get('currencySymbol') as string,
+      jarvisLanguage: formData.get('jarvisLanguage') as 'en' | 'bn',
+      jarvisVoiceGender: formData.get('jarvisVoiceGender') as 'male' | 'female',
     });
   };
 
@@ -2241,6 +2252,22 @@ function SettingsPanel({
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Currency Symbol (কারেন্সি সিম্বল)</label>
                 <input name="currencySymbol" defaultValue={settings.currencySymbol || 'TK'} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="e.g. TK, $, SAR" />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">AI Assistant Language</label>
+                <select name="jarvisLanguage" defaultValue={settings.jarvisLanguage || 'bn'} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none">
+                  <option value="bn">Bengali (বাংলা)</option>
+                  <option value="en">English (English)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">AI Assistant Voice</label>
+                <select name="jarvisVoiceGender" defaultValue={settings.jarvisVoiceGender || 'male'} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none">
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                </select>
               </div>
 
               <div>
@@ -2505,7 +2532,6 @@ function SettingsPanel({
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
               <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
                 <Smartphone className="w-6 h-6 text-emerald-600" />
@@ -2513,11 +2539,11 @@ function SettingsPanel({
               </h3>
               <p className="text-gray-500 mb-6 text-sm">Get our Android app for mobile-first inventory management on the go.</p>
               <button 
-                onClick={() => window.open('https://play.google.com/store', '_blank')}
+                onClick={onInstallPWA}
                 className="w-full py-4 bg-emerald-50 text-emerald-700 font-bold rounded-2xl border border-emerald-100 hover:bg-emerald-100 transition-all flex items-center justify-center gap-3"
               >
                 <Smartphone className="w-5 h-5" />
-                Download APK / Play Store
+                Install Mobile App (PWA)
               </button>
             </div>
 
@@ -2528,11 +2554,11 @@ function SettingsPanel({
               </h3>
               <p className="text-gray-500 mb-6 text-sm">Download the desktop application for a seamless offline-capable experience.</p>
               <button 
-                onClick={() => window.open('#', '_blank')}
+                onClick={onInstallPWA}
                 className="w-full py-4 bg-indigo-50 text-indigo-700 font-bold rounded-2xl border border-indigo-100 hover:bg-indigo-100 transition-all flex items-center justify-center gap-3"
               >
                 <MonitorIcon className="w-5 h-5" />
-                Download for Windows / Mac
+                Install Desktop App (PWA)
               </button>
             </div>
 
@@ -2599,12 +2625,137 @@ function SettingsPanel({
                 Download Expense CSV
               </button>
             </div>
+
+            {/* PWA Install Section */}
+            <div className="bg-gradient-to-br from-indigo-600 to-indigo-800 p-8 rounded-3xl shadow-xl text-white md:col-span-2 overflow-hidden relative">
+              <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
+                <Smartphone className="w-32 h-32" />
+              </div>
+              <div className="relative z-10 space-y-4">
+                <h3 className="text-2xl font-bold flex items-center gap-2">
+                  <Download className="w-8 h-8" />
+                  Install ShopMaster App (পিডব্লিউএ)
+                </h3>
+                <p className="text-indigo-100 max-w-lg">
+                  {systemLang === 'bn' 
+                    ? 'আপনার ফোনে বা কম্পিউটারে এই সিস্টেমটি অ্যাপ হিসেবে ব্যবহার করতে নিচের বাটনে ক্লিক করুন। এটি অফলাইনেও দ্রুত কাজ করবে।' 
+                    : 'Install this system as an app on your phone or computer. It stays on your home screen and works offline.'}
+                </p>
+                <div className="flex flex-wrap gap-4 pt-2">
+                  <button 
+                    onClick={() => {
+                      if (deferredPrompt) {
+                        deferredPrompt.prompt();
+                        deferredPrompt.userChoice.then((choiceResult: any) => {
+                          if (choiceResult.outcome === 'accepted') {
+                            console.log('User accepted the A2HS prompt');
+                          }
+                        });
+                      } else {
+                        alert(systemLang === 'bn' 
+                          ? 'আপনার ব্রাউজারে ইতিমধ্যে ইন্সটল করা আছে অথবা এটি সাপোর্ট করছে না। সরাসরি ব্রাউজারের "Install App" অপশন ব্যবহার করুন।' 
+                          : 'The app is already installed or your browser doesn\'t support this. Use the "Install App" option in your browser menu.');
+                      }
+                    }}
+                    className="px-8 py-4 bg-white text-indigo-600 font-bold rounded-2xl hover:bg-indigo-50 transition-all flex items-center gap-3 shadow-lg shadow-black/10"
+                  >
+                    <Plus className="w-6 h-6" />
+                    {systemLang === 'bn' ? 'অ্যান্ড্রয়েড/ডেস্কটপে ইন্সটল করুন' : 'Install for Android/Desktop'}
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
-    );
+        </div>
+      )}
+    </motion.div>
+    </>
+  );
 }
 
-function RecycleBin() { return null; }
-*/
+function RecycleBin({ items, onRestore }: { items: any[], onRestore: (item: any) => void }) {
+  const [searchTerm, setSearchTerm] = useState('');
+  
+  const filteredItems = (items || []).filter(item => {
+    const dataStr = JSON.stringify(item.data || {});
+    return (item.entityType || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+           dataStr.toLowerCase().includes(searchTerm.toLowerCase());
+  });
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="space-y-6"
+    >
+      <header className="flex items-center justify-between">
+        <div>
+          <h2 className="text-3xl font-bold text-gray-900">Recycle Bin</h2>
+          <p className="text-gray-500">Items are kept for 30 days before permanent deletion.</p>
+        </div>
+      </header>
+
+      <div className="flex flex-col md:flex-row gap-4 mb-6">
+        <div className="relative flex-1">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+          <input 
+            type="text"
+            placeholder="Search deleted items..."
+            className="w-full pl-12 pr-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+        <table className="w-full text-left">
+          <thead className="bg-gray-50 border-b border-gray-100">
+            <tr>
+              <th className="px-6 py-4 text-sm font-semibold text-gray-600">Type</th>
+              <th className="px-6 py-4 text-sm font-semibold text-gray-600">Name/Description</th>
+              <th className="px-6 py-4 text-sm font-semibold text-gray-600">Deleted Date</th>
+              <th className="px-6 py-4 text-sm font-semibold text-gray-600 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {filteredItems.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="px-6 py-20 text-center text-gray-400 font-medium">
+                  No items found in the recycle bin.
+                </td>
+              </tr>
+            ) : (
+              filteredItems.map(item => (
+                <tr key={item.id} className="hover:bg-gray-50/50 transition-colors">
+                  <td className="px-6 py-4">
+                    <span className="px-3 py-1 bg-gray-100 text-gray-600 rounded-full text-[10px] font-bold uppercase">
+                      {item.entityType}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 font-medium text-gray-900">
+                    {item.data?.name || item.data?.description || item.data?.displayName || "Item"}
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-600">
+                    {item.deletedAt && format(new Date(item.deletedAt.seconds * 1000), 'dd MMM yyyy')}
+                  </td>
+                  <td className="px-6 py-4 text-right">
+                    <button 
+                      onClick={() => onRestore(item)}
+                      className="px-3 py-1 bg-green-50 text-green-600 rounded-lg hover:bg-green-100 transition-all font-semibold text-xs border border-green-100"
+                    >
+                      Restore
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </motion.div>
+  );
+}
 
 function ShopManagement({ shops }: { shops: any[] }) {
   return (
@@ -2677,6 +2828,29 @@ export default function App() {
   const [isOnboarded, setIsOnboarded] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
+  useEffect(() => {
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    });
+  }, []);
+
+  const handleInstallPWA = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setDeferredPrompt(null);
+      }
+    } else {
+        setNotification({ 
+          message: "To install, use your browser's 'Install' or 'Add to Home Screen' option.", 
+          type: 'info' 
+        });
+    }
+  };
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
     const saved = localStorage.getItem('sidebar_visible');
     return saved !== null ? saved === 'true' : window.innerWidth >= 1024;
@@ -2838,7 +3012,7 @@ export default function App() {
       const prompt = `The user searched for a customer named "${query}" but they don't exist in the database. Write a very short (max 15 words) friendly and helpful AI assistant message suggesting to add them as a new customer. Be professional but welcoming. Example: "I couldn't find ${query}. Would you like me to help you add them to your records?"`;
       
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-flash-latest",
         contents: prompt
       });
       
@@ -3045,6 +3219,8 @@ export default function App() {
     printLanguage: 'bn',
     systemLanguage: 'bn',
     currencySymbol: 'TK',
+    jarvisLanguage: 'bn',
+    jarvisVoiceGender: 'male',
   });
 
   useEffect(() => {
@@ -3932,6 +4108,23 @@ export default function App() {
     }
   };
 
+  const handleAddProduct = async (newProduct: Partial<Product>) => {
+    try {
+      if (!user?.shopId) return;
+      const maxSerial = products.reduce((max, p) => p.serialNumber ? Math.max(max, p.serialNumber) : max, 0);
+      const docRef = await addDoc(collection(db, 'products'), {
+        ...newProduct,
+        shopId: user.shopId,
+        serialNumber: maxSerial + 1,
+        createdAt: new Date().toISOString()
+      });
+      setNotification({ message: 'Product added successfully', type: 'success' });
+      return docRef.id;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'products');
+    }
+  };
+
   const handleAddCustomer = async (newCustomer: Omit<Customer, 'id' | 'serialNumber'>): Promise<string | undefined> => {
     try {
       const docRef = await addDoc(collection(db, 'customers'), {
@@ -4261,7 +4454,7 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <div className={`min-h-screen bg-gray-50 flex flex-col lg:flex-row ${isRtl ? 'rtl' : ''}`} dir={isRtl ? 'rtl' : 'ltr'}>
+      <div className={`min-h-screen bg-white flex flex-col lg:flex-row ${isRtl ? 'rtl' : ''}`} dir={isRtl ? 'rtl' : 'ltr'}>
         {/* Mobile Header */}
         <header className="lg:hidden bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between sticky top-0 z-50 shadow-sm">
           <div className="flex items-center gap-2">
@@ -4314,11 +4507,10 @@ export default function App() {
               transition={{ type: "spring", damping: 25, stiffness: 200 }}
               className={`
                 fixed inset-y-0 ${isRtl ? 'right-0' : 'left-0'} z-50 bg-white border-r border-gray-100 flex flex-col shadow-2xl lg:shadow-none
-                ${window.innerWidth >= 1024 ? 'lg:static lg:h-screen' : ''}
-                ${!isSidebarOpen && window.innerWidth >= 1024 ? 'hidden lg:flex transition-none' : 'flex'}
+                lg:static lg:h-screen lg:w-72
+                ${!isSidebarOpen ? 'hidden lg:flex' : 'flex'}
                 overflow-hidden
               `}
-              style={!isSidebarOpen && window.innerWidth >= 1024 ? { display: 'none' } : {}}
             >
               <div className="p-6 flex items-center justify-between gap-3 relative overflow-hidden group">
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
@@ -4345,7 +4537,7 @@ export default function App() {
                 </button>
               </div>
 
-          <nav className="flex-1 px-4 py-6 overflow-y-auto custom-scrollbar space-y-1.5 bg-gray-50/30">
+          <nav className="flex-1 px-4 py-6 overflow-y-auto custom-scrollbar space-y-1.5 bg-white">
             {[
               ...(isMasterAdmin ? [{ 
                 id: 'master', 
@@ -4355,6 +4547,7 @@ export default function App() {
                 ] 
               }] : []),
               { id: 'core', label: 'core', items: [
+                { id: 'jarvis', icon: Bot, label: st('jarvisAI'), roles: ['admin'], color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100' },
                 { id: 'dashboard', icon: LayoutDashboard, label: st('dashboard'), roles: ['admin', 'manager'], color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100' },
                 { id: 'pos', icon: ShoppingCart, label: st('pos'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'], color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100' },
               ]},
@@ -4471,26 +4664,188 @@ export default function App() {
         </AnimatePresence>
 
         {/* Main Content */}
-        <main className={`flex-1 transition-all duration-300 ${activeTab === 'pos' ? 'p-0 sm:p-2 lg:p-3' : 'p-4 lg:p-8'} overflow-x-hidden relative`}>
+        <main className={`flex-1 transition-all duration-300 ${(activeTab === 'pos' || activeTab === 'jarvis') ? 'p-0 sm:p-2 lg:p-3' : 'p-4 lg:p-8'} overflow-x-hidden relative bg-white`}>
           <AnimatePresence>
-            {!isSidebarOpen && (
-              <motion.button 
-                initial={{ x: -20, opacity: 0, scale: 0.8 }}
-                animate={{ x: 0, opacity: 1, scale: 1 }}
-                exit={{ x: -20, opacity: 0, scale: 0.8 }}
-                whileHover={{ scale: 1.05, x: 4 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => setIsSidebarOpen(true)}
-                className={`hidden lg:flex fixed ${isRtl ? 'right-6' : 'left-6'} top-6 z-40 p-3 bg-white border border-gray-200 rounded-2xl text-indigo-600 shadow-xl shadow-indigo-100 hover:bg-indigo-50 transition-all group items-center gap-2`}
-              >
-                <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-200 group-hover:rotate-6 transition-transform">
-                  <Building2 className="w-5 h-5 text-white" />
-                </div>
-                <Menu className="w-5 h-5" />
-              </motion.button>
-            )}
+            {activeTab !== 'jarvis' && <motion.button 
+              initial={{ x: -20, opacity: 0, scale: 0.8 }}
+              animate={{ x: isSidebarOpen ? -100 : 0, opacity: isSidebarOpen ? 0 : 1, scale: isSidebarOpen ? 0.8 : 1 }}
+              whileHover={{ scale: 1.05, x: 4 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setIsSidebarOpen(true)}
+              className={`lg:hidden fixed ${isRtl ? 'right-6' : 'left-6'} top-6 z-[60] p-3 bg-white border border-gray-200 rounded-2xl text-indigo-600 shadow-xl shadow-indigo-100 hover:bg-indigo-50 transition-all group flex items-center gap-2`}
+            >
+              <Menu className="w-6 h-6" />
+            </motion.button>}
           </AnimatePresence>
           <AnimatePresence mode="wait">
+            {activeTab === 'jarvis' && (
+              <JarvisAI 
+                shopId={user?.shopId || ''}
+                onClose={() => setActiveTab('dashboard')}
+                systemData={{
+                  items: products,
+                  sales: sales,
+                  customers: customers,
+                  categories: categories,
+                  settings: shopSettings
+                }}
+                actions={{
+                  addItem: handleAddProduct,
+                  addCustomer: handleAddCustomer,
+                  removeItem: async (id) => {
+                    const product = products.find(p => p.id === id);
+                    if (product) handleDeleteProduct(product);
+                  },
+                  navigate: (tab: any) => setActiveTab(tab),
+                  addToPOS: (items: any[]) => {
+                    setActiveTab('pos');
+                    setCart([]); // Clear cart to add new items from voice command
+                    items.forEach(i => {
+                      const p = products.find(prod => prod.name.toLowerCase().includes(i.productName.toLowerCase()));
+                      if (p) addToCart(p, i.quantity);
+                    });
+                  },
+                  sendReminder: (c: any) => {
+                    handleSendWhatsAppReminder(c, shopSettings.systemLanguage as any || 'bn');
+                  },
+                  printLatestInvoice: () => {
+                    if (sales.length > 0) {
+                      printInvoice(sales[0], shopSettings);
+                    } else {
+                      setNotification({ message: 'No invoice found to print', type: 'error' });
+                    }
+                  },
+                  sendLatestInvoiceWhatsApp: () => {
+                    if (sales.length > 0) {
+                      sendWhatsAppInvoice(sales[0], shopSettings, shopSettings.systemLanguage as any);
+                    } else {
+                      setNotification({ message: 'No invoice found', type: 'error' });
+                    }
+                  },
+                  createDirectSale: async (saleData: any) => {
+                    try {
+                      const itemsToSell: any[] = [];
+                      let cartTotal = 0;
+                      let errorMsg = "";
+
+                      // Build cart
+                      for (const i of saleData.items) {
+                        const p = products.find(prod => prod.name.toLowerCase().includes(i.productName.toLowerCase()));
+                        if (p) {
+                          if (p.stock < i.quantity) {
+                            errorMsg += `Not enough stock for ${p.name}. `;
+                          } else {
+                            const price = p.price - (p.discount || 0);
+                            itemsToSell.push({
+                              id: p.id,
+                              name: p.name,
+                              quantity: i.quantity,
+                              unit: p.unit || 'unit',
+                              discountedPrice: price,
+                              originalPrice: p.price,
+                              cost: p.cost || 0
+                            });
+                            cartTotal += price * i.quantity;
+                          }
+                        } else {
+                          errorMsg += `Product ${i.productName} not found. `;
+                        }
+                      }
+
+                      if (itemsToSell.length === 0) {
+                        return { success: false, error: errorMsg || 'No items to sell.' };
+                      }
+
+                      // Find customer
+                      let selectedCustomer: Customer | undefined;
+                      if (saleData.customerPhoneOrName) {
+                        const q = saleData.customerPhoneOrName.toLowerCase();
+                        selectedCustomer = customers.find(c => c.name.toLowerCase().includes(q) || c.phone.includes(q));
+                      }
+
+                      const finalTotal = cartTotal; // Assuming no additional tax/discount for AI sales for simplicity
+                      let paidAmount = saleData.paidAmount;
+                      if (paidAmount === undefined) paidAmount = finalTotal;
+                      
+                      if (!selectedCustomer && paidAmount < finalTotal) {
+                        return { success: false, error: 'Walk-in customers must pay in full!' };
+                      }
+
+                      const dueAmount = finalTotal - paidAmount;
+                      const previousBalance = selectedCustomer?.currentDue || 0;
+                      const currentLang = shopSettings.systemLanguage || 'bn';
+                      const defaultRetailName = currentLang === 'bn' ? 'নগদ ক্রেতা (Walk-in)' : 'Retail Sale (Walk-in)';
+
+                      const finalSaleData: any = {
+                        shopId: user?.shopId,
+                        customerName: selectedCustomer?.name || defaultRetailName,
+                        customerPhone: selectedCustomer?.phone || '',
+                        customerId: selectedCustomer?.id || null,
+                        items: itemsToSell.map(item => ({
+                          productId: item.id || '',
+                          productName: item.name || 'Unknown Product',
+                          quantity: item.quantity || 0,
+                          unit: item.unit || 'unit',
+                          price: item.discountedPrice || 0,
+                          originalPrice: item.originalPrice || 0,
+                          cost: item.cost || 0
+                        })),
+                        totalAmount: cartTotal,
+                        discount: 0,
+                        taxRate: 0,
+                        taxAmount: 0,
+                        finalAmount: finalTotal,
+                        paidAmount: paidAmount,
+                        dueAmount: dueAmount,
+                        previousBalance: previousBalance,
+                        paymentMethod: 'cash',
+                        timestamp: new Date(),
+                        sellerId: auth.currentUser?.uid || 'unknown'
+                      };
+
+                      let finalSale: Sale;
+                      if (!isOnline) {
+                        const customId = generateInvoiceId();
+                        finalSale = { ...finalSaleData, id: customId } as Sale;
+                        await addToSyncQueue('sale', { saleData: finalSaleData, customId, cart: itemsToSell });
+                      } else {
+                        const customId = generateInvoiceId();
+                        await setDoc(doc(db, 'sales', customId), finalSaleData);
+                        finalSale = { ...finalSaleData, id: customId } as Sale;
+                        
+                        // Update stock
+                        for (const item of itemsToSell) {
+                          const productRef = doc(db, 'products', item.id);
+                          await updateDoc(productRef, { stock: increment(-item.quantity) });
+                        }
+                        
+                        // Update customer
+                        if (selectedCustomer) {
+                          const customerRef = doc(db, 'customers', selectedCustomer.id);
+                          // We use finalTotal for totalSpent and (finalTotal - paidAmount) for due increment.
+                          await updateDoc(customerRef, {
+                            currentDue: increment(finalTotal - paidAmount),
+                            totalSpent: increment(finalTotal)
+                          });
+                        }
+                      }
+                      
+                      if (saleData.printInvoice) {
+                        printInvoice(finalSale, shopSettings);
+                      }
+                      
+                      if (saleData.sendWhatsApp && isOnline) {
+                        await sendWhatsAppInvoice(finalSale, shopSettings, currentLang as any);
+                      }
+
+                      return { success: true, total: finalTotal, paid: paidAmount, due: dueAmount };
+                    } catch (e: any) {
+                      return { success: false, error: e.message };
+                    }
+                  }
+                }}
+              />
+            )}
             {activeTab === 'dashboard' && (
               <Dashboard 
                 products={products} 
@@ -4688,6 +5043,8 @@ export default function App() {
                 sales={sales}
                 customers={customers}
                 expenses={expenses}
+                deferredPrompt={deferredPrompt}
+                onInstallPWA={handleInstallPWA}
               />
             )}
             {/* {activeTab === 'recycle_bin' && (
@@ -5118,8 +5475,8 @@ function Dashboard({ products, sales, customers, expenses, dailyClosings, settin
             <p className="text-gray-400 font-medium">{st('welcome')}, {user?.email?.split('@')[0]}! {st('businessSnapshot')}.</p>
           </div>
         </div>
-        <div className="flex bg-gray-100/50 p-1 rounded-2xl border border-gray-100 overflow-hidden self-start md:self-auto shadow-inner">
-          {(['day', 'week', 'month', 'year'] as const).map((p) => (
+        <div className="flex bg-white/50 p-1 rounded-2xl border border-gray-100 overflow-hidden self-start md:self-auto shadow-inner">
+          {(['day', 'month', 'year'] as const).map((p) => (
             <button
               key={p}
               onClick={() => setPeriod(p)}
@@ -9027,7 +9384,7 @@ function Inventory({ products, categories, stockRecords, sales, onViewHistory, s
       setIsAiThinking(true);
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-flash-latest",
         contents: `Product Name: "${productName}"
 List of available categories: ${FIXED_CATEGORIES.join(', ')}
 
