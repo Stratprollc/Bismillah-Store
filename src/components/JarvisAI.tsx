@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
 import { db, collection, doc, updateDoc, deleteDoc, addDoc, handleFirestoreError, OperationType } from '../firebase';
+import { fuzzyMatchProduct } from '../utils/productMatcher';
 
 // Standard Web Speech API types
 interface SpeechRecognitionEvent extends Event {
@@ -56,12 +57,14 @@ declare global {
 interface JarvisAIProps {
   onClose: () => void;
   shopId: string;
+  isMasterAdmin?: boolean;
   systemData: {
     items: any[];
     sales: any[];
     customers: any[];
     categories: any[];
     settings: any;
+    merchants?: any[];
   };
   actions: {
     addItem: (item: any) => Promise<any>;
@@ -76,7 +79,7 @@ interface JarvisAIProps {
   };
 }
 
-export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData, actions }) => {
+export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData, actions, isMasterAdmin = false }) => {
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -113,6 +116,7 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
   
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const speechWatchdogRef = useRef<any>(null);
 
   // Removed toggleLanguage as per user request to manage it via settings panel instead
 
@@ -256,89 +260,108 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
     
     // Stop any current speech
     window.speechSynthesis.cancel();
+    if (speechWatchdogRef.current) {
+      clearTimeout(speechWatchdogRef.current);
+      speechWatchdogRef.current = null;
+    }
 
-    // Clean text for TTS (remove symbols that confuse Bengali engines)
+    // Clean text for TTS
+    // Use short pause markers instead of long strings to avoid choppiness
     const cleanText = text
       .replace(/[^\u0980-\u09FFa-zA-Z0-9\s,.?।!]/g, ' ')
       .replace(/\s+/g, ' ')
+      .replace(/।/g, '. ') // Standard dot sometimes sounds better for pauses
       .trim();
 
     if (!cleanText) return false;
 
-    const utterance = new SpeechSynthesisUtterance(cleanText);
-    
-    // Voice selection
-    const voices = window.speechSynthesis.getVoices();
-    
-    // Normalize language codes
-    const isBengali = language === 'bn';
-    
-    // Better gender terms including common Bengali voice patterns
-    const genderTerms = voiceGender === 'female' 
-      ? ['female', 'google female', 'microsoft zira', 'samantha', 'victoria', 'kiti', 'pallabi', 'zaira', 'kalpana', 'hemant']
-      : ['male', 'google male', 'microsoft david', 'alex', 'daniel', 'ravi', 'kashyap', 'amit', 'niloy', 'bangladesh male', 'stefan', 'hemant'];
+    // Split text into slightly smaller chunks to prevent engine stuttering on long sentences
+    const chunks = cleanText.match(/.{1,120}(\s|$)/g) || [cleanText];
+    let chunkIndex = 0;
 
-    // High Quality Bengali Voice Patterns
-    // Priority: Specific regional high-quality voices -> Google/MS generic -> any bn
-    const preferredBengaliVoices = voiceGender === 'female'
-      ? ['google বাংলা', 'bn-bd-female', 'bn-in-female', 'pallabi', 'kiti', 'zaira', 'kalpana']
-      : ['google বাংলা', 'bn-bd-male', 'bn-in-male', 'amit', 'niloy', 'sagar', 'golam', 'hemant'];
+    const speakChunk = () => {
+      if (chunkIndex >= chunks.length || isMutedRef.current) {
+        setIsSpeaking(false);
+        if (speechWatchdogRef.current) {
+          clearTimeout(speechWatchdogRef.current);
+          speechWatchdogRef.current = null;
+        }
+        if (!isMutedRef.current && !isProcessingRef.current) {
+          startRecognition(true);
+        }
+        return;
+      }
 
-    let voice = voices.find(v => 
-      v.lang.toLowerCase().includes('bn') && 
-      preferredBengaliVoices.some(name => v.name.toLowerCase().includes(name))
-    );
+      const utterance = new SpeechSynthesisUtterance(chunks[chunkIndex]);
+      
+      const voices = window.speechSynthesis.getVoices();
+      const isBengali = language === 'bn';
+      
+      const genderTerms = voiceGender === 'female' 
+        ? ['female', 'google female', 'microsoft zira', 'pallabi', 'zaira', 'kalpana']
+        : ['male', 'google male', 'microsoft david', 'niloy', 'bangladesh male', 'hemant'];
 
-    // Try any voice with 'bn' and gender match
-    if (!voice) {
-      voice = voices.find(v => 
+      const preferredBengaliVoices = voiceGender === 'female'
+        ? ['google বাংলা', 'bn-bd-female', 'bn-in-female', 'pallabi', 'kiti']
+        : ['google বাংলা', 'bn-bd-male', 'bn-in-male', 'amit', 'niloy'];
+
+      let voice = voices.find(v => 
         v.lang.toLowerCase().includes('bn') && 
-        genderTerms.some(term => v.name.toLowerCase().includes(term))
+        preferredBengaliVoices.some(name => v.name.toLowerCase().includes(name))
       );
-    }
 
-    // Try any 'bn' voice
-    if (!voice) {
-      voice = voices.find(v => v.lang.toLowerCase().includes('bn'));
-    }
-
-    // Fallback for English
-    if (!isBengali && !voice) {
-      voice = voices.find(v => 
-        v.lang.toLowerCase().startsWith('en') && 
-        genderTerms.some(term => v.name.toLowerCase().includes(term))
-      );
-    }
-    
-    if (voice) {
-        console.log("TTS - Selected voice:", voice.name, "Lang:", voice.lang);
-        utterance.voice = voice;
-        utterance.lang = voice.lang;
-    } else {
-        console.warn("TTS - No suitable voice found for", language, voiceGender);
-        utterance.lang = isBengali ? 'bn-BD' : 'en-US';
-    }
-    
-    // Speed and Pitch optimization (Web Speech API can sound choppy if rate/pitch is modified too much, 1.0 is safest for natural voice on Android/Chrome)
-    utterance.rate = 1.0; 
-    utterance.pitch = 1.0; 
-
-    utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => {
-      setIsSpeaking(false);
-      if (!isMuted && !isProcessing) {
-        startRecognition(true);
+      if (!voice) {
+        voice = voices.find(v => 
+          v.lang.toLowerCase().includes('bn') && 
+          genderTerms.some(term => v.name.toLowerCase().includes(term))
+        );
       }
-    };
-    utterance.onerror = (e) => {
-      console.error("SpeechSynthesis error:", e);
-      setIsSpeaking(false);
-      if (!isMuted && !isProcessing) {
-        startRecognition(true);
+
+      if (!voice) {
+        voice = voices.find(v => v.lang.toLowerCase().includes('bn'));
       }
+
+      if (!isBengali && !voice) {
+        voice = voices.find(v => v.lang.toLowerCase().startsWith('en'));
+      }
+      
+      if (voice) {
+          utterance.voice = voice;
+          utterance.lang = voice.lang;
+      } else {
+          utterance.lang = isBengali ? 'bn-BD' : 'en-US';
+      }
+      
+      utterance.rate = 1.0; 
+      utterance.pitch = 1.0; 
+
+      utterance.onstart = () => setIsSpeaking(true);
+      utterance.onend = () => {
+        chunkIndex++;
+        speakChunk();
+      };
+      utterance.onerror = (e) => {
+        console.error("SpeechSynthesis error:", e);
+        chunkIndex++;
+        speakChunk();
+      };
+
+      window.speechSynthesis.speak(utterance);
     };
 
-    window.speechSynthesis.speak(utterance);
+    const expectedDuration = Math.max(3000, (cleanText.length * 150)); // 150ms per character
+    speechWatchdogRef.current = setTimeout(() => {
+      if (isSpeakingRef.current) {
+        console.warn("TTS Watchdog Fired - Speech synthesis onend might have been dropped");
+        window.speechSynthesis.cancel();
+        setIsSpeaking(false);
+        if (!isMutedRef.current && !isProcessingRef.current) {
+          startRecognition(true);
+        }
+      }
+    }, expectedDuration + 4000);
+
+    speakChunk();
     return true;
   };
 
@@ -598,22 +621,16 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
       
       // Local fallback for common commands if API is missing or fails
       const lowerCmd = command.toLowerCase();
-      if (!apiKey || lowerCmd.includes("সারাংশ") || lowerCmd.includes("summary") || lowerCmd.includes("আয়") || lowerCmd.includes("revenue")) {
-        if (lowerCmd.includes("সারাংশ") || lowerCmd.includes("summary") || lowerCmd.includes("আয়") || lowerCmd.includes("revenue") || lowerCmd.includes("হিসাব")) {
-            const todaySales = systemData.sales.filter(s => new Date(s.date).toDateString() === new Date().toDateString());
-            const totalRevenue = todaySales.reduce((acc, s) => acc + (s.totalAmount || 0), 0);
-            const feedback = language === 'bn'
-              ? `আজকের সারাংশ: মোট ${todaySales.length} টি সেল হয়েছে। মোট আয় হয়েছে ${totalRevenue.toLocaleString()} টাকা।`
-              : `Today's summary: Total ${todaySales.length} sales. Total revenue is ${totalRevenue.toLocaleString()}.`;
-            setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
-            speak(feedback);
-            setIsProcessing(false);
-            return;
-        }
-      }
-
-      if (!apiKey) {
-         throw new Error("API Key is missing.");
+      if (!apiKey || lowerCmd.includes("সারাংশ") || lowerCmd.includes("summary") || lowerCmd.includes("আয়") || lowerCmd.includes("revenue") || lowerCmd.includes("হিসাব")) {
+        const todaySales = systemData.sales.filter(s => new Date(s.date).toDateString() === new Date().toDateString());
+        const totalRevenue = todaySales.reduce((acc, s) => acc + (s.totalAmount || 0), 0);
+        const feedback = language === 'bn'
+          ? `আজকের সারাংশ: মোট ${todaySales.length} টি সেল হয়েছে। মোট আয় হয়েছে ${totalRevenue.toLocaleString()} টাকা।`
+          : `Today's summary: Total ${todaySales.length} sales. Total revenue is ${totalRevenue.toLocaleString()}.`;
+        setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
+        speak(feedback);
+        setIsProcessing(false);
+        return;
       }
 
       const ai = new GoogleGenAI({ apiKey }); 
@@ -624,44 +641,43 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
         config: {
           systemInstruction: `You are the AI Assistant for Bismillah Store Management System. 
 
-          # CRITICAL LANGUAGE PROTOCOL (STRICT):
+          # CRITICAL LANGUAGE PROTOCOL:
           - CURRENT LANGUAGE SETTING: ${language === 'bn' ? 'BENGALI (বাংলা)' : 'ENGLISH'}.
-          - If the setting is 'bn', you MUST ONLY output text in BENGALI (বাংলা) script.
-          - USE CONVERSATIONAL, NATURAL BENGALI (একদম সাধারণ মানুষের মত চলিত ভাষায় কথা বলবেন). 
-          - Talk just like a real human assistant. Use a very friendly, natural tone. 
-          - Keep your sentences short, simple, and clear so the text-to-speech engine sounds natural. Do not use overly complex or formal words (যেমন 'অতঃপর', 'সংযোজন', 'বিধায়' ইত্যাদি বাদ দিয়ে 'এরপর', 'অ্যাড', 'তাই' ব্যবহার করুন).
+          - If the setting is 'bn', you MUST ONLY output text in BENGALI script.
+          - ইউজার আপনার সাথে যেভাবে কথা করছে, আপনিও ঠিক সেভাবে রিঅ্যাক্ট করবেন। কোনো কৃত্রিমতা পরিহার করবেন। ছোট বাক্য ব্যবহার করবেন। "হ্যাঁ", "অবশ্যই", "ঠিক আছে", "জ্বি" comfortably.
           - EVEN IF the user speaks to you in English, if the setting is 'bn', you MUST respond in BENGALI.
-          - ABSOLUTELY NO English sentences or phrases (except technical product names where no clear Bengali exists).
-          - Use polite but friendly Bengali (আপনি/আপনার).
-          - If the setting is 'en', you MUST ONLY output text in ENGLISH.
+          - ABSOLUTELY NO English sentences or phrases (except product names).
           
-          # PERSONALITY & ROLE:
-          Your voice matches a ${voiceGender} persona. You are extremely helpful, quick, and conversational.
+          # PERSONALITY:
+          You are a professional shop manager assistant. You are extremely helpful and quick.
+          
+          # NO REDIRECTION / SILENT PERFORMANCE PROTOCOL:
+          - Do NOT automatically use 'navigateApp' to switch tabs or close the assistant panel when checking stock, adding sales, adding products, or checking details. Keep the user on their active view.
+          - Only use 'navigateApp' if the user explicitly/literally asks to change screens (e.g., "আমাকে ইনভেন্টরি পেজে নিয়ে যাও" or "রিপোর্ট প্যানেলে যাও"). Otherwise, do everything SILENTLY through the appropriate calls without moving them.
           
           # DIRECT SALE PROTOCOL:
-          If the user tells you to add a sale using specific products (e.g., '10 kg flour, 15 kg potatoes for customer Habib, paid 500'):
-          1. Check the item names and try to map them to your knowledge.
-          2. ALWAYS use the 'createDirectSale' tool immediately. Pass the extracted items, customerName if available, and paidAmount if stated.
-          3. DO NOT use 'prepareInvoice' / 'addToPOS' unless the user explicitly wants to go to the Point of Sale screen manually. For direct quick sales, use 'createDirectSale'.
-          4. When using 'createDirectSale', you don't need to ask for confirmation if the user has provided items. Just execute it.
-          5. If the user asks whether to send a WhatsApp message, DO NOT use 'sendLatestInvoiceWhatsApp' right away. The code response will ask the user.
-          6. If you previously completed a sale, and the user responds with "Yes" or "হ্যাঁ" (affirming they want to send it to WhatsApp), THEN call 'sendLatestInvoiceWhatsApp'.
+          If the user provides items (e.g., 'হাবিবের জন্য ১০ কেজি ময়দা আর ৫ কেজি আলু, ৫০০ টাকা জমা'):
+          1. MAP the products to the inventory. If they say "ময়দা", search for "flour".
+          2. Use 'createDirectSale' IMMEDIATELY.
+          3. Confirm: "হাবিবের ৫ কেজি আলু আর ১০ কেজি ময়দার সেল অ্যাড করা হয়েছে। টোটাল বিল হয়েছে... টাকা, জমা... টাকা, বকেয়া... টাকা।"
+          4. ASK: "আমি কি ইনভয়েসটি হোয়াটসঅ্যাপে পাঠিয়ে দিবো?" (Should I send the invoice on WhatsApp?).
+          5. If they say "Yes" or "পাঠিয়ে দাও", use 'sendLatestInvoiceWhatsApp'.
           
-          # SALES & HISTORY PROTOCOL:
-          - If the user asks for sales summary (today, week, month), use 'getSalesSummary'.
-          - If the user asks about a specific customer's history, dues, or products they bought before, use 'getCustomerDetails'.
+          # ACCESS & KNOWLEDGE:
+          - You have full access to database (Inventory, Customers, Sales).
+          - If they ask for sales summary (today, week, month), use 'getSalesSummary'.
+          - If they ask about a customer's history/dues, use 'getCustomerDetails'.
           
-          # CONTEXT:
-          - Inventory Count: ${systemData.items.length} products.
-          - Sales Today: ${systemData.sales.filter(s => new Date(s.date).toDateString() === new Date().toDateString()).length} entries.
+          # SERIAL NUMBERS & STOCK POSITIONS:
+          - If the user asks about a serial number/index (e.g., "১১ নম্বর সিরিয়ালে কি প্রোডাক্ট আছে", "১২ নম্বর কি", "১১ নম্বরে কি প্রোডাক্ট"), use 'checkInventory' with the number as productName (e.g. productName: "11" or "১১").
+          - If they ask for a product's serial number or stock (e.g., "ময়দা কত নম্বর সিরিয়াল" or "গমের ভুসি কত স্টক আছে"), use 'checkInventory' with the product name (e.g. productName: "ময়দা").
+          - Always mention both the stock and the serial number/index in your response.
           
-          # VOICE CAPABILITIES:
-          - If the user asks about uploading their own voice, explain that currently you use system voices (Standard Web Speech API) and don't support custom voice cloning or upload yet.
-          - I have enabled continuous listening for you. You don't need to ask the user to click. You can talk to them like a real person.
+          # VOICE:
+          - Continuous listening is ACTIVE. Talk like a real person.
           
           # FUNCTION USAGE:
-          You can add/update/remove products, manage customers, generate pos invoices, send reminders, navigate panels, print invoices, send whatsapp invoices, check low stock products, check customer due amounts, query summaries, and update settings.
-          Execute tools when requested/implied and confirm the action in the CURRENT LANGUAGE (${language === 'bn' ? 'বাংলা' : 'English'}).`,
+          Execute tools when requested/implied and confirm in ${language === 'bn' ? 'বাংলা' : 'English'}.`,
           tools: [{ functionDeclarations: tools }]
         }
       });
@@ -687,13 +703,13 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
             accumulatedSpeech += feedback + " ";
           } else if (call.name === 'checkInventory') {
             const productName = String(call.args.productName || '');
-            const item = systemData.items.find(i => 
-              i.name.toLowerCase().includes(productName.toLowerCase())
-            );
+            const item = fuzzyMatchProduct(systemData.items, productName);
+            const idx = systemData.items.findIndex((i: any) => i.id === (item?.id || '')) + 1;
+            const serialNo = item?.serialNumber || idx;
             const feedback = item 
               ? (language === 'bn' 
-                  ? `${item.name} এর বর্তমান স্টক আছে ${item.stock} টি।`
-                  : `${item.name} currently has ${item.stock} in stock.`)
+                  ? `${item.name} (সিরিয়াল নম্বর #${serialNo}) এর বর্তমান স্টক আছে ${item.stock} ${item.unit || 'টি'} এবং এটার দাম ${item.price} টাকা।`
+                  : `${item.name} (Serial No. #${serialNo}) currently has ${item.stock} ${item.unit || 'units'} in stock with a price of ${item.price} ${systemData.settings.currency || '৳'}.`)
               : (language === 'bn' 
                   ? `দুঃখিত, আমি "${productName}" নামের কোনো প্রোডাক্ট খুঁজে পাইনি।` 
                   : `Sorry, I could not find product "${productName}".`);
@@ -760,9 +776,17 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
           } else if (call.name === 'getSystemSummary') {
             const todaySales = systemData.sales.filter(s => new Date(s.date).toDateString() === new Date().toDateString());
             const totalRevenue = todaySales.reduce((acc, s) => acc + (s.totalAmount || 0), 0);
-            const feedback = language === 'bn'
+            let feedback = language === 'bn'
               ? `আজকের সারাংশ: মোট ${todaySales.length} টি সেল হয়েছে। মোট আয় হয়েছে ${totalRevenue.toLocaleString()} টাকা। ইনভেন্টরিতে এখন ${systemData.items.length} টি প্রোডাক্ট আছে।`
               : `Today's summary: Total ${todaySales.length} sales. Total revenue is ${totalRevenue.toLocaleString()}. There are ${systemData.items.length} products in inventory.`;
+            
+            if (isMasterAdmin && systemData.merchants) {
+               const merchantCount = systemData.merchants.length;
+               feedback += language === 'bn' 
+                 ? ` এছাড়া আমাদের নেটওয়ার্কে বর্তমানে মোট ${merchantCount} জন মার্চেন্ট যুক্ত আছেন।`
+                 : ` Additionally, there are a total of ${merchantCount} merchants in our network.`;
+            }
+
             setHistory(prev => [...prev, { role: 'assistant', text: feedback }]);
             accumulatedSpeech += feedback + " ";
           } else if (call.name === 'updateProduct') {
@@ -932,7 +956,7 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
                accumulatedSpeech += feedback + " ";
              }
           } else if (call.name === 'getSalesSummary') {
-             const period = call.args.period;
+             const period = String(call.args.period || 'today');
              let filteredSales = [];
              const now = new Date();
              if (period === 'today') {

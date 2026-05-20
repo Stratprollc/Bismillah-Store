@@ -1,5 +1,6 @@
 {
   "name": "ShopMaster - Super Shop Management System",
-  "description": "A comprehensive management system for retail shops, featuring inventory tracking, POS, sales reporting, and customer management.",
-  "requestFramePermissions": ["camera", "microphone"]
+  "description": "A comprehensive management system for retail shops, featuring multi-branch management, inventory tracking, POS, real-time sales reporting, and employee management.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

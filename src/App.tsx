@@ -103,13 +103,21 @@ import {
   Factory,
   Database as DatabaseIcon,
   PhoneCall,
-  Loader2
+  Loader2,
+  Volume2,
+  VolumeX,
+  Copy,
+  Delete
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import Papa from 'papaparse';
 import { CategoryManagement } from './components/CategoryManagement';
 import { JarvisAI } from './components/JarvisAI';
+import { NetworkConsole } from './components/NetworkConsole';
+import BranchManagement from './components/BranchManagement';
+import { Branch } from './components/BranchManagement';
+import { fuzzyMatchProduct } from './utils/productMatcher';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   db, 
@@ -395,6 +403,7 @@ const SYSTEM_TRANSLATIONS = {
     employees: 'Employees',
     dailyClosing: 'Daily Closing',
     settings: 'Settings & Admin',
+    jarvisAI: 'AI Assistant',
     totalSales: 'Total Sales',
     totalPurchase: 'Total Purchase',
     totalProfit: 'Total Profit',
@@ -3107,6 +3116,8 @@ export default function App() {
   const [shops, setShops] = useState<any[]>([]);
   const [appUsers, setAppUsers] = useState<AppUser[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [selectedBranchId, setSelectedBranchId] = useState<string>('all');
   const [syncQueue, setSyncQueue] = useState<any[]>([]);
   const isMasterAdmin = user?.email?.toLowerCase().trim() === 'stratproamz@gmail.com';
 
@@ -3423,6 +3434,10 @@ export default function App() {
       setNotes(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Note)));
     }, (err) => console.error("Notes sync error", err));
 
+    const unsubBranches = onSnapshot(query(collection(db, 'branches'), where('shopId', '==', currentShopId)), (snapshot) => {
+      setBranches(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Branch)));
+    }, (err) => console.error("Branches sync error", err));
+
     return () => {
       unsubSettings();
       unsubUsers();
@@ -3440,6 +3455,7 @@ export default function App() {
       unsubCustomerLogs();
       unsubDuePayments();
       unsubNotes();
+      unsubBranches();
     };
   }, [user, auth.currentUser]);
 
@@ -4161,6 +4177,33 @@ export default function App() {
     }
   };
 
+  const handleAddBranch = async (newBranch: Omit<Branch, 'id'>) => {
+    try {
+      await addDoc(collection(db, 'branches'), { ...newBranch, shopId: user.shopId });
+      setNotification({ message: 'Branch created and deployed successfully', type: 'success' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'branches');
+    }
+  };
+
+  const handleUpdateBranch = async (id: string, updatedBranch: Partial<Branch>) => {
+    try {
+      await updateDoc(doc(db, 'branches', id), updatedBranch);
+      setNotification({ message: 'Branch settings updated successfully', type: 'success' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'branches');
+    }
+  };
+
+  const handleDeleteBranch = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'branches', id));
+      setNotification({ message: 'Branch deleted successfully', type: 'success' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'branches');
+    }
+  };
+
   const handleAddExpense = async (newExpense: Omit<Expense, 'id'>) => {
     try {
       await addDoc(collection(db, 'expenses'), { ...newExpense, shopId: user.shopId });
@@ -4448,6 +4491,59 @@ export default function App() {
     );
   }
 
+  // Dynamic Branch Manager restriction logic
+  useEffect(() => {
+    if (!user || user.role === 'admin' || branches.length === 0 || employees.length === 0) {
+      return;
+    }
+    const currentUserEmail = user.email?.toLowerCase().trim();
+    if (!currentUserEmail) return;
+
+    const matchedEmp = employees.find(emp => emp.email?.toLowerCase().trim() === currentUserEmail);
+    if (matchedEmp) {
+      const managedBranch = branches.find(b => b.managerId === matchedEmp.id);
+      if (managedBranch && selectedBranchId !== managedBranch.id) {
+        setSelectedBranchId(managedBranch.id);
+      }
+    }
+  }, [user, branches, employees, selectedBranchId]);
+
+  const branchFilteredProducts = useMemo(() => {
+    return products.filter(p => selectedBranchId === 'all' || p.branchId === selectedBranchId);
+  }, [products, selectedBranchId]);
+
+  const branchFilteredSales = useMemo(() => {
+    return sales.filter(s => selectedBranchId === 'all' || s.branchId === selectedBranchId);
+  }, [sales, selectedBranchId]);
+
+  const branchFilteredCustomers = useMemo(() => {
+    return customers.filter(c => selectedBranchId === 'all' || c.branchId === selectedBranchId);
+  }, [customers, selectedBranchId]);
+
+  const branchFilteredEmployees = useMemo(() => {
+    return employees.filter(e => selectedBranchId === 'all' || e.branchId === selectedBranchId);
+  }, [employees, selectedBranchId]);
+
+  const branchFilteredExpenses = useMemo(() => {
+    return expenses.filter(e => selectedBranchId === 'all' || e.branchId === selectedBranchId);
+  }, [expenses, selectedBranchId]);
+
+  const branchFilteredInvestments = useMemo(() => {
+    return investments.filter(i => selectedBranchId === 'all' || i.branchId === selectedBranchId);
+  }, [investments, selectedBranchId]);
+
+  const branchFilteredDailyClosings = useMemo(() => {
+    return dailyClosings.filter(d => selectedBranchId === 'all' || d.branchId === selectedBranchId);
+  }, [dailyClosings, selectedBranchId]);
+
+  const branchFilteredNotes = useMemo(() => {
+    return notes.filter(n => selectedBranchId === 'all' || n.branchId === selectedBranchId);
+  }, [notes, selectedBranchId]);
+
+  const branchFilteredStaffSalaries = useMemo(() => {
+    return staffSalaries.filter(s => selectedBranchId === 'all' || s.branchId === selectedBranchId);
+  }, [staffSalaries, selectedBranchId]);
+
   if (user && isOnboarded === false) {
     return <ShopOnboarding onComplete={handleOnboardingComplete} />;
   }
@@ -4543,7 +4639,7 @@ export default function App() {
                 id: 'master', 
                 label: 'master_console', 
                 items: [
-                  { id: 'shops', icon: Shield, label: 'Merchant Network Console', roles: ['admin', 'manager', 'sales_team', 'assistant_manager'], color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-100' }
+                  { id: 'shops', icon: Globe, label: 'Network Console', roles: ['admin'], color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-100' }
                 ] 
               }] : []),
               { id: 'core', label: 'core', items: [
@@ -4638,6 +4734,20 @@ export default function App() {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               onClick={() => {
+                window.dispatchEvent(new CustomEvent('open-calculator'));
+                if (window.innerWidth < 1024) {
+                  setIsSidebarOpen(false);
+                }
+              }}
+              className="w-full flex items-center justify-center gap-3 py-3 mb-2 bg-gradient-to-r from-indigo-50 to-purple-50 hover:from-indigo-600 hover:to-purple-700 hover:text-white text-indigo-700 rounded-xl transition-all font-bold text-sm border border-indigo-100/50 shadow-sm"
+            >
+              <CalculatorIcon className="w-5 h-5" />
+              {shopSettings.systemLanguage === 'bn' ? 'ক্যালকুলেটর (Calculator)' : 'Open Calculator'}
+            </motion.button>
+            <motion.button 
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => {
                 if (!isFullScreen) {
                   document.documentElement.requestFullscreen().catch(() => {});
                 } else {
@@ -4677,17 +4787,74 @@ export default function App() {
               <Menu className="w-6 h-6" />
             </motion.button>}
           </AnimatePresence>
+
+          {activeTab !== 'jarvis' && (
+            <div className="mb-6 mt-12 lg:mt-0 flex flex-col md:flex-row md:items-center md:justify-between gap-4 p-4 md:p-6 bg-gradient-to-r from-gray-50 to-indigo-50/10 rounded-3xl border border-gray-100 shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-indigo-600/10 text-indigo-600 rounded-2xl">
+                  <Building className="w-6 h-6" />
+                </div>
+                <div>
+                  <h2 className="text-[10px] font-black text-gray-400 uppercase tracking-widest leading-none mb-1">
+                    {shopSettings.systemLanguage === 'bn' ? 'কার্যকরী শাখা' : 'Active Branch'}
+                  </h2>
+                  <p className="text-xl font-black text-gray-900 tracking-tight">
+                    {selectedBranchId === 'all' 
+                      ? (shopSettings.systemLanguage === 'bn' ? 'প্রধান শাখা এবং সকল শাখা' : 'Main / All Branches')
+                      : (branches.find(b => b.id === selectedBranchId)?.name || 'Branch')}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {user?.role === 'admin' ? (
+                  <div className="relative">
+                    <select
+                      value={selectedBranchId}
+                      onChange={(e) => setSelectedBranchId(e.target.value)}
+                      className="appearance-none pl-4 pr-10 py-3 bg-white border border-gray-200 hover:border-indigo-500 rounded-2xl text-sm font-bold text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-sm min-w-[200px]"
+                    >
+                      <option value="all">🌐 {shopSettings.systemLanguage === 'bn' ? 'সকল শাখা (All)' : 'All Branches'}</option>
+                      {branches.map((b) => (
+                        <option key={b.id} value={b.id}>🏢 {b.name} ({b.code})</option>
+                      ))}
+                    </select>
+                    <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
+                      <ChevronDown className="w-5 h-5" />
+                    </div>
+                  </div>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-100/60 text-indigo-700 rounded-2xl text-xs font-bold ring-1 ring-indigo-200">
+                    🔒 {shopSettings.systemLanguage === 'bn' ? 'শাখা লকড' : 'Branch Locked'} (
+                    {branches.find(b => b.id === selectedBranchId)?.name || (shopSettings.systemLanguage === 'bn' ? 'প্রধান শাখা' : 'Main Branch')}
+                    )
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
           <AnimatePresence mode="wait">
+            {activeTab === 'shops' && isMasterAdmin && (
+              <motion.div
+                key="network-console"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+              >
+                <NetworkConsole />
+              </motion.div>
+            )}
             {activeTab === 'jarvis' && (
               <JarvisAI 
                 shopId={user?.shopId || ''}
+                isMasterAdmin={isMasterAdmin}
                 onClose={() => setActiveTab('dashboard')}
                 systemData={{
                   items: products,
                   sales: sales,
                   customers: customers,
                   categories: categories,
-                  settings: shopSettings
+                  settings: shopSettings,
+                  merchants: shops
                 }}
                 actions={{
                   addItem: handleAddProduct,
@@ -4701,7 +4868,7 @@ export default function App() {
                     setActiveTab('pos');
                     setCart([]); // Clear cart to add new items from voice command
                     items.forEach(i => {
-                      const p = products.find(prod => prod.name.toLowerCase().includes(i.productName.toLowerCase()));
+                      const p = fuzzyMatchProduct(products, i.productName);
                       if (p) addToCart(p, i.quantity);
                     });
                   },
@@ -4730,7 +4897,7 @@ export default function App() {
 
                       // Build cart
                       for (const i of saleData.items) {
-                        const p = products.find(prod => prod.name.toLowerCase().includes(i.productName.toLowerCase()));
+                        const p = fuzzyMatchProduct(products, i.productName);
                         if (p) {
                           if (p.stock < i.quantity) {
                             errorMsg += `Not enough stock for ${p.name}. `;
@@ -4848,11 +5015,11 @@ export default function App() {
             )}
             {activeTab === 'dashboard' && (
               <Dashboard 
-                products={products} 
-                sales={sales} 
-                customers={customers} 
-                expenses={expenses}
-                dailyClosings={dailyClosings}
+                products={branchFilteredProducts} 
+                sales={branchFilteredSales} 
+                customers={branchFilteredCustomers} 
+                expenses={branchFilteredExpenses}
+                dailyClosings={branchFilteredDailyClosings}
                 settings={shopSettings}
                 onDelete={handleDeleteDailyClosing}
                 onViewProductHistory={(p) => {
@@ -4865,8 +5032,8 @@ export default function App() {
             )}
             {activeTab === 'pos' && (
               <POS 
-                sales={sales}
-                products={products} 
+                sales={branchFilteredSales}
+                products={branchFilteredProducts} 
                 cart={cart} 
                 addToCart={addToCart} 
                 removeFromCart={removeFromCart} 
@@ -4882,7 +5049,7 @@ export default function App() {
                 taxAmount={taxAmount}
                 cartTotal={cartTotal}
                 finalTotal={finalTotal}
-                customers={customers}
+                customers={branchFilteredCustomers}
                 checkoutData={checkoutData}
                 setCheckoutData={setCheckoutData}
                 editingSale={editingSale}
@@ -4909,10 +5076,10 @@ export default function App() {
             )}
             {activeTab === 'inventory' && (
               <Inventory 
-                products={products} 
+                products={branchFilteredProducts} 
                 categories={categories} 
                 stockRecords={stockRecords}
-                sales={sales}
+                sales={branchFilteredSales}
                 onViewHistory={(p) => {
                   setSelectedProductForHistory(p);
                 }}
@@ -4934,18 +5101,18 @@ export default function App() {
             )}
             {activeTab === 'sales' && (
               <SalesHistory 
-                sales={sales} 
+                sales={branchFilteredSales} 
                 onEdit={handleEditSale}
                 onDelete={handleDeleteSale}
                 settings={shopSettings}
                 isOnline={isOnline}
-                customers={customers}
+                customers={branchFilteredCustomers}
               />
             )}
             {activeTab === 'customers' && (
               <Customers 
-                customers={customers} 
-                sales={sales} 
+                customers={branchFilteredCustomers} 
+                sales={branchFilteredSales} 
                 setNotification={setNotification}
                 shopSettings={shopSettings}
                 user={user}
@@ -4959,7 +5126,7 @@ export default function App() {
             )}
             {activeTab === 'employees' && (
               <EmployeeManagement 
-                employees={employees} 
+                employees={branchFilteredEmployees} 
                 onAdd={handleAddEmployee} 
                 onUpdate={handleUpdateEmployee} 
                 onDelete={handleDeleteEmployee} 
@@ -4967,9 +5134,9 @@ export default function App() {
             )}
             {activeTab === 'daily_closing' && (
               <DailyClosingView 
-                sales={sales} 
-                expenses={expenses} 
-                dailyClosings={dailyClosings}
+                sales={branchFilteredSales} 
+                expenses={branchFilteredExpenses} 
+                dailyClosings={branchFilteredDailyClosings}
                 duePayments={duePayments}
                 settings={shopSettings}
                 user={user}
@@ -4978,11 +5145,11 @@ export default function App() {
               />
             )}
             {activeTab === 'barcode' && (
-              <BarcodePage products={products} settings={shopSettings} />
+              <BarcodePage products={branchFilteredProducts} settings={shopSettings} />
             )}
             {activeTab === 'note' && (
               <NoteView 
-                notes={notes} 
+                notes={branchFilteredNotes} 
                 onAdd={handleAddNote} 
                 onUpdate={handleUpdateNote} 
                 onDelete={handleDeleteNote}
@@ -4991,14 +5158,14 @@ export default function App() {
             )}
             {activeTab === 'warranty' && (
               <WarrantyPage 
-                products={products} 
+                products={branchFilteredProducts} 
                 settings={shopSettings} 
               />
             )}
             {activeTab === 'loan_management' && (
               <LoanManagement 
-                products={products}
-                customers={customers}
+                products={branchFilteredProducts}
+                customers={branchFilteredCustomers}
                 settings={shopSettings}
               />
             )}
@@ -5006,19 +5173,19 @@ export default function App() {
             {activeTab === 'courier' && <CourierView />}
             {activeTab === 'supplier' && (
               <SupplierPage 
-                products={products}
+                products={branchFilteredProducts}
                 settings={shopSettings}
               />
             )}
             {activeTab === 'activation_code' && <ActivationCodePage />}
             {activeTab === 'accounting' && (
               <Accounting 
-                sales={sales} 
-                products={products} 
-                expenses={expenses} 
-                investments={investments} 
-                staffSalaries={staffSalaries}
-                customers={customers}
+                sales={branchFilteredSales} 
+                products={branchFilteredProducts} 
+                expenses={branchFilteredExpenses} 
+                investments={branchFilteredInvestments} 
+                staffSalaries={branchFilteredStaffSalaries}
+                customers={branchFilteredCustomers}
                 onAddExpense={handleAddExpense}
                 onAddInvestment={handleAddInvestment}
                 onAddSalary={handleAddStaffSalary}
@@ -5026,6 +5193,18 @@ export default function App() {
                 onDeleteInvestment={handleDeleteInvestment}
                 onDeleteSalary={handleDeleteStaffSalary}
                 onSendWhatsAppReminder={handleSendWhatsAppReminder}
+              />
+            )}
+            {activeTab === 'branch' && (
+              <BranchManagement 
+                branches={branches}
+                employees={employees}
+                onAdd={handleAddBranch}
+                onUpdate={handleUpdateBranch}
+                onDelete={handleDeleteBranch}
+                settings={shopSettings}
+                selectedBranchId={selectedBranchId}
+                onSelectBranch={setSelectedBranchId}
               />
             )}
             {activeTab === 'shops' && isMasterAdmin && (
@@ -5039,10 +5218,10 @@ export default function App() {
                 onAddUser={handleAddUser}
                 onDeleteUser={handleDeleteUser}
                 isSaving={isSavingSettings}
-                products={products}
-                sales={sales}
-                customers={customers}
-                expenses={expenses}
+                products={branchFilteredProducts}
+                sales={branchFilteredSales}
+                customers={branchFilteredCustomers}
+                expenses={branchFilteredExpenses}
                 deferredPrompt={deferredPrompt}
                 onInstallPWA={handleInstallPWA}
               />
@@ -5828,6 +6007,44 @@ function Calculator({ settings, isRtl, isSidebarOpen }: { settings: ShopSettings
   const [isOpen, setIsOpen] = useState(false);
   const [lastEquation, setLastEquation] = useState<string | null>(null);
   const [isAiThinking, setIsAiThinking] = useState(false);
+  const [calcHistory, setCalcHistory] = useState<{ equation: string; result: string; timestamp: string }[]>(() => {
+    try {
+      const saved = localStorage.getItem('shop_calc_history');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [isAudioFeedbackEnabled, setIsAudioFeedbackEnabled] = useState(true);
+  const [memory, setMemory] = useState<number>(0);
+
+  // Global listener to easily open calculator from sidebar or head bar
+  useEffect(() => {
+    const handleToggle = () => setIsOpen(prev => !prev);
+    const handleOpen = () => setIsOpen(true);
+    const handleClose = () => setIsOpen(false);
+    window.addEventListener('toggle-calculator', handleToggle);
+    window.addEventListener('open-calculator', handleOpen);
+    window.addEventListener('close-calculator', handleClose);
+    return () => {
+      window.removeEventListener('toggle-calculator', handleToggle);
+      window.removeEventListener('open-calculator', handleOpen);
+      window.removeEventListener('close-calculator', handleClose);
+    };
+  }, []);
+
+  const saveHistory = (equation: string, result: string) => {
+    const newRecord = {
+      equation,
+      result,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+    setCalcHistory(prev => {
+      const updated = [newRecord, ...prev].slice(0, 50); // limit to 50 records
+      localStorage.setItem('shop_calc_history', JSON.stringify(updated));
+      return updated;
+    });
+  };
 
   const handleAction = (val: string) => {
     if (val === 'C') {
@@ -5841,34 +6058,178 @@ function Calculator({ settings, isRtl, isSidebarOpen }: { settings: ShopSettings
         setLastEquation(display);
         // eslint-disable-next-line no-new-func
         const result = new Function('return ' + display)();
-        setDisplay(String(result ?? '0'));
+        const calculatedStr = String(result ?? '0');
+        setDisplay(calculatedStr);
+        saveHistory(display, calculatedStr);
+        if (isAudioFeedbackEnabled) {
+          speakNumber(calculatedStr);
+        }
+      } catch {
+        setDisplay('Error');
+      }
+    } else if (val === 'MC') {
+      setMemory(0);
+    } else if (val === 'MR') {
+      setDisplay(String(memory));
+    } else if (val === 'M+') {
+      try {
+        // eslint-disable-next-line no-new-func
+        const currentVal = new Function('return ' + display)();
+        setMemory(prev => prev + (Number(currentVal) || 0));
+      } catch {}
+    } else if (val === 'M-') {
+      try {
+        // eslint-disable-next-line no-new-func
+        const currentVal = new Function('return ' + display)();
+        setMemory(prev => prev - (Number(currentVal) || 0));
+      } catch {}
+    } else if (val === 'sqrt') {
+      try {
+        // eslint-disable-next-line no-new-func
+        const currentVal = new Function('return ' + display)();
+        const root = Math.sqrt(Number(currentVal) || 0);
+        setDisplay(String(root));
+        setLastEquation(`√(${display})`);
+        saveHistory(`√(${display})`, String(root));
       } catch {
         setDisplay('Error');
       }
     } else {
       setDisplay(prev => {
         if (prev === 'Error') return val;
-        if (prev === '0' && !['+', '-', '*', '/', '.', '(', ')'].includes(val)) return val;
+        if (prev === '0' && !['+', '-', '*', '/', '.', '(', ')', '%'].includes(val)) return val;
         return prev + val;
       });
     }
   };
 
+  const speakNumber = (text: string) => {
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    
+    // Convert text numbers to Bengali phrasing if system settings language is 'bn'
+    let speakText = text;
+    if (settings.systemLanguage === 'bn') {
+      speakText = `হিসাবের উত্তর হচ্ছে ${text}`;
+    } else {
+      speakText = `Calculation result is ${text}`;
+    }
+    
+    const utterance = new SpeechSynthesisUtterance(speakText);
+    utterance.lang = settings.systemLanguage === 'bn' ? 'bn-BD' : 'en-US';
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // Keyboard integration
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const key = e.key;
+      if (key >= '0' && key <= '9') {
+        handleAction(key);
+      } else if (['+', '-', '*', '/'].includes(key)) {
+        handleAction(key);
+      } else if (key === '.') {
+        handleAction('.');
+      } else if (key === '(' || key === ')') {
+        handleAction(key);
+      } else if (key === 'Enter' || key === '=') {
+        e.preventDefault();
+        handleAction('=');
+      } else if (key === 'Backspace') {
+        handleAction('del');
+      } else if (key === 'Escape') {
+        handleAction('C');
+      } else if (key.toLowerCase() === 'c') {
+        handleAction('C');
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, display, memory]);
+
+  const convertBanglaSpokenToMathExpression = (inp: string): string => {
+    let text = inp.toLowerCase().trim();
+    
+    // Replace Bengali digits
+    const bnToEnDigits: { [key: string]: string } = {
+      '০': '0', '১': '1', '২': '2', '৩': '3', '৪': '4',
+      '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9'
+    };
+    text = text.split('').map(char => bnToEnDigits[char] || char).join('');
+
+    // Replace Bengali spoken numbers
+    const verbalMapping: { [key: string]: string } = {
+      'একশ': '100', 'একশো': '100', 'দুইশ': '200', 'দুইশো': '200', 'তিনশ': '300', 'তিনশো': '300',
+      'চারশ': '400', 'চারশো': '400', 'পাচশ': '500', 'পাঁচশ': '500', 'পাঁচশো': '500', 'পাচশো': '500',
+      'ছয়শ': '600', 'ছয়শো': '600', 'সাতশ': '700', 'সাতশো': '700', 'আটশ': '800', 'আটশো': '800',
+      'নয়শ': '900', 'নয়শো': '900',
+      'শূন্য': '0', 'এক': '1', 'দুই': '2', 'তিন': '3', 'চার': '4', 'পাঁচ': '5', 'পাচ': '5',
+      'ছয়': '6', 'সাত': '7', 'আট': '8', 'নয়': '9', 'দশ': '10', 'এগারো': '11', 'বারো': '12',
+      'তেরো': '13', 'চৌদ্দ': '14', 'পনেরো': '15', 'ষোলো': '16', 'সতেরো': '17', 'আঠারো': '18',
+      'উনিশ': '19', 'কুড়ি': '20', 'বিশ': '20', 'ত্রিশ': '30', 'চল্লিশ': '40', 'পঞ্চাশ': '50',
+      'ষাট': '60', 'সত্তর': '70', 'আশি': '80', 'নব্বই': '90', 'হাজার': '000', 'লাখ': '00000'
+    };
+
+    const operatorMap: { [key: string]: string } = {
+      'প্লাস': '+', 'যোগ': '+', 'আরও': '+', 'সাথে': '+', 'এবং': '+',
+      'মাইনাস': '-', 'বিয়োগ': '-', 'বাদ': '-',
+      'ইনটু': '*', 'গুণ': '*', 'গুন': '*',
+      'ভাগ': '/', 'ডিভাইড': '/', 'বাই': '/'
+    };
+
+    const words = text.split(/\s+/);
+    const resultWords = words.map(word => {
+      if (verbalMapping[word] !== undefined) return verbalMapping[word];
+      if (operatorMap[word] !== undefined) return operatorMap[word];
+      return word;
+    });
+
+    let expr = resultWords.join(' ');
+    expr = expr.replace(/প্লাস/g, '+').replace(/যোগ/g, '+');
+    expr = expr.replace(/মাইনাস/g, '-').replace(/বিয়োগ/g, '-');
+    expr = expr.replace(/গুণ/g, '*').replace(/গুন/g, '*').replace(/ইনটু/g, '*');
+    expr = expr.replace(/ভাগ/g, '/').replace(/ডিভাইড/g, '/');
+    expr = expr.replace(/[^0-9+\-*/.()]/g, '');
+
+    return expr;
+  };
+
   const handleVoiceCommand = async (text: string) => {
-    // Basic cleanup of transcript for better AI parsing
     const cleanedText = text.trim();
     if (!cleanedText) return;
 
+    // First try local rapid parser
+    const localExpr = convertBanglaSpokenToMathExpression(cleanedText);
+    if (localExpr && localExpr.length > 0 && /[0-9]/.test(localExpr)) {
+      setDisplay(prev => {
+        let current = (prev === '0' || prev === 'Error') ? '' : prev;
+        const lastChar = current.slice(-1);
+        const firstChar = localExpr[0];
+        const isLastOp = ['+', '-', '*', '/'].includes(lastChar);
+        const isFirstOp = ['+', '-', '*', '/'].includes(firstChar);
+        
+        if (isLastOp && isFirstOp) {
+           return current.slice(0, -1) + localExpr;
+        }
+        const isLastDigit = /[0-9]/.test(lastChar);
+        const isFirstDigit = /[0-9]/.test(firstChar);
+        if (isLastDigit && isFirstDigit && current.length > 0) {
+           return current + '+' + localExpr;
+        }
+        return current + localExpr;
+      });
+      return;
+    }
+
+    // AI Fallback
     try {
       setIsAiThinking(true);
       const expression = await parseMathVoiceCommandAI(cleanedText);
       if (!expression || expression === "ERROR") return;
       
-      // Add the expression directly to the display
       setDisplay(prev => {
           let current = (prev === '0' || prev === 'Error') ? '' : prev;
-          
-          // Remove trailing operator if expression starts with one
           const lastChar = current.slice(-1);
           const firstChar = expression[0];
           
@@ -5878,8 +6239,6 @@ function Calculator({ settings, isRtl, isSidebarOpen }: { settings: ShopSettings
           if (isLastOp && isFirstOp) {
              return current.slice(0, -1) + expression;
           }
-
-          // Smart Append: If current ends in digit and expression starts with digit, add '+'
           const isLastDigit = /[0-9]/.test(lastChar);
           const isFirstDigit = /[0-9]/.test(firstChar);
           
@@ -5906,128 +6265,266 @@ function Calculator({ settings, isRtl, isSidebarOpen }: { settings: ShopSettings
     }
   }, [isOpen, isListening, toggleVoiceSearch]);
 
+  const clearHistory = () => {
+    setCalcHistory([]);
+    localStorage.removeItem('shop_calc_history');
+  };
+
   return (
     <>
+      {/* Floating Trigger Button with high z-id */}
       <button 
         onClick={() => setIsOpen(!isOpen)}
-        className={`fixed bottom-24 ${isRtl ? (isSidebarOpen && window.innerWidth >= 1024 ? 'right-[312px]' : 'right-8') : (isSidebarOpen && window.innerWidth >= 1024 ? 'left-[312px]' : 'left-8')} w-16 h-16 bg-gradient-to-br from-indigo-600 to-purple-700 text-white rounded-2xl shadow-2xl flex items-center justify-center hover:scale-110 active:scale-95 transition-all duration-500 z-50 group hover:rotate-3 shadow-indigo-200/50`}
-        title="Calculator"
+        className={`fixed bottom-24 ${isRtl ? (isSidebarOpen && window.innerWidth >= 1024 ? 'right-[312px]' : 'right-8') : (isSidebarOpen && window.innerWidth >= 1024 ? 'left-[312px]' : 'left-8')} w-16 h-16 bg-gradient-to-br from-indigo-600 via-indigo-700 to-purple-800 text-white rounded-2xl shadow-[0_8px_30px_rgb(79,70,229,0.3)] flex items-center justify-center hover:scale-110 active:scale-95 transition-all duration-300 z-[100] group shadow-indigo-200/50`}
+        title={settings.systemLanguage === 'bn' ? 'ক্যালকুলেটর' : 'Calculator'}
         id="calc-open-trigger"
       >
-        <CalculatorIcon className="w-8 h-8 group-hover:scale-110 transition-transform" />
+        <span className="absolute -top-1 -right-1 flex h-3 w-3">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-pink-400 opacity-75"></span>
+          <span className="relative inline-flex rounded-full h-3 w-3 bg-pink-500"></span>
+        </span>
+        <CalculatorIcon className="w-8 h-8 group-hover:rotate-12 transition-transform" />
       </button>
 
+      {/* Center Modal with Backdrop blur */}
       <AnimatePresence>
         {isOpen && (
-          <motion.div 
-            initial={{ opacity: 0, y: 50, scale: 0.9, x: isRtl ? 20 : -20 }}
-            animate={{ opacity: 1, y: 0, scale: 1, x: 0 }}
-            exit={{ opacity: 0, y: 50, scale: 0.9, x: isRtl ? 20 : -20 }}
-            className={`fixed bottom-44 ${isRtl ? (isSidebarOpen && window.innerWidth >= 1024 ? 'right-[312px]' : 'right-8') : (isSidebarOpen && window.innerWidth >= 1024 ? 'left-[312px]' : 'left-8')} w-[92vw] sm:w-[480px] bg-white rounded-[2.5rem] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.2)] border border-white/20 p-8 z-50 overflow-hidden backdrop-blur-xl transition-all duration-500`}
-          >
-            <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
+          <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsOpen(false)}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
+            />
             
-            <div className="flex justify-between items-center mb-8">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 shadow-inner">
-                  <CalculatorIcon className="w-6 h-6" />
+            {/* Main Dialog Panel (Beautiful, spacious, with history) */}
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: "spring", duration: 0.5 }}
+              className="relative w-full max-w-4xl bg-white rounded-[2.5rem] shadow-[0_50px_100px_-20px_rgba(0,0,0,0.3)] border border-slate-100 overflow-hidden flex flex-col lg:flex-row max-h-[90vh]"
+            >
+              <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
+              
+              {/* Left Column: Calculator Board */}
+              <div className="flex-1 p-6 md:p-8 flex flex-col justify-between overflow-y-auto min-h-0">
+                <div className="flex justify-between items-center mb-6">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 shadow-inner">
+                      <CalculatorIcon className="w-6 h-6 animate-pulse" />
+                    </div>
+                    <div>
+                      <h3 className="font-extrabold text-slate-800 text-base tracking-tight">
+                        {settings.systemLanguage === 'bn' ? 'স্মার্ট ক্যালকুলেটর' : 'Smart Calculator'}
+                      </h3>
+                      <p className="text-[10px] text-indigo-500 font-black uppercase tracking-widest">
+                        {settings.systemLanguage === 'bn' ? 'ভয়েস কন্ট্রোল সক্রিয়' : 'Voice Enabled'} • {voiceLang}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  {/* Status buttons */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setIsAudioFeedbackEnabled(!isAudioFeedbackEnabled)}
+                      className={`p-2.5 rounded-xl border transition-all ${isAudioFeedbackEnabled ? 'bg-indigo-50 border-indigo-100 text-indigo-600' : 'bg-gray-50 border-gray-100 text-gray-400'}`}
+                      title={settings.systemLanguage === 'bn' ? 'ফলাফল শোনান' : 'Audio Feedback'}
+                    >
+                      {isAudioFeedbackEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+                    </button>
+                    <button 
+                      onClick={toggleVoiceSearch}
+                      className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs transition-all ${isListening ? 'bg-red-500 text-white animate-pulse shadow-lg' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                    >
+                      {isListening ? <MicOff className="w-4 h-4 text-white" /> : <Mic className="w-4 h-4" />}
+                      <span>{isListening ? 'STOP' : 'VOICE'}</span>
+                    </button>
+                    <button 
+                      onClick={() => setIsOpen(false)} 
+                      className="p-2.5 hover:bg-slate-100 rounded-xl transition-all text-slate-400 active:scale-90 border border-transparent"
+                    >
+                      <X className="w-5 h-5 text-slate-500" />
+                    </button>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="font-black text-gray-900 text-sm tracking-widest uppercase">Smart Calculator</h3>
-                  <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tight">Voice Enabled • {voiceLang}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <button 
-                  onClick={toggleVoiceSearch}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-xs transition-all ${isListening ? 'bg-red-500 text-white animate-pulse shadow-lg shadow-red-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                >
-                  {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                  {isListening ? 'STOP' : 'VOICE'}
-                </button>
-                <button 
-                  onClick={() => setIsOpen(false)} 
-                  className="p-3 hover:bg-gray-100 rounded-2xl transition-all text-gray-400 active:scale-90"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
 
-            {voiceFeedback && (
-              <div className="mb-4 px-4 py-3 bg-indigo-50/80 backdrop-blur-sm text-xs font-bold text-indigo-600 rounded-2xl border border-indigo-100/50 animate-in slide-in-from-top-2 flex items-center gap-3">
-                <div className="flex gap-1">
-                  {[1, 2, 3].map(i => (
-                    <motion.span 
+                {voiceFeedback && (
+                  <div className="mb-4 px-4 py-3 bg-indigo-50/90 text-xs font-bold text-indigo-600 rounded-2xl border border-indigo-100/50 flex items-center gap-3">
+                    <div className="flex gap-1">
+                      {[1, 2, 3].map(i => (
+                        <motion.span 
+                          key={i}
+                          animate={{ height: [4, 12, 4] }}
+                          transition={{ repeat: Infinity, duration: 0.6, delay: i * 0.1 }}
+                          className="w-1 bg-indigo-600 rounded-full"
+                        />
+                      ))}
+                    </div>
+                    <span className="truncate italic">"{voiceFeedback}"</span>
+                  </div>
+                )}
+
+                {isAiThinking && (
+                  <div className="mb-4 px-4 py-3 bg-purple-50 text-xs font-bold text-purple-600 rounded-2xl border border-purple-100/50 animate-pulse flex items-center gap-3">
+                    <Sparkles className="w-4 h-4 text-purple-600 animate-spin" />
+                    <span className="tracking-tight uppercase">AI is extracting numbers...</span>
+                  </div>
+                )}
+
+                {/* Display Screen */}
+                <div className="bg-slate-900 p-6 rounded-[2rem] mb-6 text-right shadow-inner flex flex-col justify-end overflow-hidden group min-h-[160px] relative border border-slate-800">
+                  <div className="absolute top-4 left-4 flex gap-1.5">
+                     <span className="w-3 h-3 rounded-full bg-rose-500/80"></span>
+                     <span className="w-3 h-3 rounded-full bg-amber-500/80"></span>
+                     <span className="w-3 h-3 rounded-full bg-emerald-500/80"></span>
+                  </div>
+                  {lastEquation && (
+                    <div className="text-xs text-indigo-300 font-mono font-bold mb-2 opacity-60 tracking-widest break-all">
+                      {lastEquation} =
+                    </div>
+                  )}
+                  <p className={`font-mono font-bold text-white break-all tracking-tight transition-all duration-200 ${
+                    display.length > 200 ? 'text-xs' : 
+                    display.length > 100 ? 'text-sm' : 
+                    display.length > 50 ? 'text-lg' : 
+                    display.length > 30 ? 'text-2xl' : 
+                    display.length > 15 ? 'text-4xl' : 'text-6xl'
+                  } ${display === 'Error' ? 'text-rose-400' : ''}`}>
+                    {display}
+                  </p>
+                </div>
+
+                {/* Calculator Keyboard */}
+                <div className="grid grid-cols-4 gap-2.5 sm:gap-3.5">
+                  {[
+                    { val: 'MC', color: 'bg-indigo-50/50 hover:bg-indigo-100/80 text-indigo-700 text-xs font-black' },
+                    { val: 'MR', color: 'bg-indigo-50/50 hover:bg-indigo-100/80 text-indigo-700 text-xs font-black' },
+                    { val: 'M+', color: 'bg-indigo-50/50 hover:bg-indigo-100/80 text-indigo-700 text-xs font-black' },
+                    { val: 'M-', color: 'bg-indigo-50/50 hover:bg-indigo-100/80 text-indigo-700 text-xs font-black' },
+                    
+                    { val: 'C', color: 'bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-100 font-extrabold' },
+                    { val: 'del', icon: <Delete className="w-5 h-5" />, color: 'bg-amber-50 hover:bg-amber-100 text-amber-600 border border-amber-100' },
+                    { val: '(', color: 'bg-slate-100/70 hover:bg-slate-200 text-slate-700 font-medium' },
+                    { val: ')', color: 'bg-slate-100/70 hover:bg-slate-200 text-slate-700 font-medium' },
+                    
+                    { val: '7' }, { val: '8' }, { val: '9' }, { val: '/', color: 'bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-lg' },
+                    
+                    { val: '4' }, { val: '5' }, { val: '6' }, { val: '*', color: 'bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-lg' },
+                    
+                    { val: '1' }, { val: '2' }, { val: '3' }, { val: '-', color: 'bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-lg' },
+                    
+                    { val: 'sqrt', label: '√', color: 'bg-slate-100 hover:bg-slate-200 text-indigo-600 font-semibold' },
+                    { val: '0' },
+                    { val: '.' },
+                    { val: '+', color: 'bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-lg' },
+                    
+                    { val: '=', color: 'col-span-4 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white hover:opacity-95 shadow-lg shadow-indigo-100 text-2xl font-black h-16' },
+                  ].map((btn, i) => (
+                    <button
                       key={i}
-                      animate={{ height: [4, 12, 4] }}
-                      transition={{ repeat: Infinity, duration: 0.6, delay: i * 0.1 }}
-                      className="w-1 bg-indigo-600 rounded-full"
-                    />
+                      onClick={() => handleAction(btn.val)}
+                      className={`h-12 sm:h-14 rounded-2xl text-base sm:text-lg transition-all active:scale-95 flex items-center justify-center font-bold relative overflow-hidden shadow-sm ${
+                        btn.color || 'bg-slate-50 border border-slate-100 text-slate-800 hover:bg-white hover:border-slate-200 hover:shadow-md'
+                      } ${btn.val === '=' ? 'col-span-4' : ''}`}
+                    >
+                      {btn.icon || btn.label || btn.val}
+                    </button>
                   ))}
                 </div>
-                <span className="truncate italic">"{voiceFeedback}"</span>
               </div>
-            )}
 
-            {isAiThinking && (
-              <div className="mb-4 px-4 py-3 bg-purple-50/80 backdrop-blur-sm text-xs font-bold text-purple-600 rounded-2xl border border-purple-100/50 animate-pulse flex items-center gap-3">
-                <Sparkles className="w-4 h-4 text-purple-600" />
-                <span className="tracking-tight Uppercase">AI is extracting numbers...</span>
+              {/* Right Column: History Sidebar Panel */}
+              <div className="w-full lg:w-80 bg-slate-50 border-t lg:border-t-0 lg:border-l border-slate-100 p-6 md:p-8 flex flex-col justify-between overflow-y-auto min-h-0">
+                <div>
+                  <div className="flex justify-between items-center mb-6">
+                    <div className="flex items-center gap-2">
+                      <History className="w-5 h-5 text-indigo-600" />
+                      <h4 className="font-extrabold text-slate-800 text-sm tracking-tight text-indigo-950 uppercase">
+                        {settings.systemLanguage === 'bn' ? 'হিসাবের ইতিহাস' : 'History'}
+                      </h4>
+                    </div>
+                    {calcHistory.length > 0 && (
+                      <button 
+                        onClick={clearHistory}
+                        className="text-[11px] font-bold text-rose-500 hover:text-rose-700 hover:underline flex items-center gap-1 bg-white px-2 py-1 rounded-lg border border-slate-100"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        {settings.systemLanguage === 'bn' ? 'মুছুন' : 'Clear'}
+                      </button>
+                    )}
+                  </div>
+
+                  {calcHistory.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-12 text-slate-400 text-center gap-3 bg-white/50 rounded-2xl border border-dashed border-slate-200">
+                      <History className="w-8 h-8 text-slate-300 stroke-1" />
+                      <p className="text-xs font-medium max-w-[180px]">
+                        {settings.systemLanguage === 'bn' ? 'কোনো পূর্ববর্তী হিসাব রেকর্ড পাওয়া যায়নি' : 'No calculations yet'}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3 max-h-[300px] lg:max-h-[500px] overflow-y-auto pr-1">
+                      {calcHistory.map((h, i) => (
+                        <div 
+                          key={i} 
+                          className="bg-white p-3.5 rounded-xl border border-slate-150 flex flex-col gap-1 shadow-sm hover:border-indigo-100 group transition-all"
+                        >
+                          <div className="flex justify-between text-[10px] text-slate-400 font-bold">
+                            <span>{h.timestamp}</span>
+                            <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button 
+                                onClick={() => {
+                                  setDisplay(h.equation);
+                                  setLastEquation(null);
+                                }}
+                                className="text-indigo-600 hover:underline"
+                                title="Use Equation"
+                              >
+                                {settings.systemLanguage === 'bn' ? 'ব্যবহার' : 'Use Eq'}
+                              </button>
+                              <button 
+                                onClick={() => {
+                                  setDisplay(prev => prev === '0' ? h.result : prev + h.result);
+                                }}
+                                className="text-indigo-600 hover:underline"
+                                title="Append Result"
+                              >
+                                {settings.systemLanguage === 'bn' ? '+ ফলাফল' : '+ Result'}
+                              </button>
+                            </div>
+                          </div>
+                          <p className="text-xs font-mono font-medium text-slate-500 break-all">{h.equation} =</p>
+                          <p 
+                            className="text-sm font-mono font-black text-slate-800 break-all cursor-pointer hover:text-indigo-600 transition-colors flex items-center gap-1"
+                            onClick={() => {
+                              try {
+                                navigator.clipboard.writeText(h.result);
+                                alert(settings.systemLanguage === 'bn' ? 'ফলাফল কপি করা হয়েছে!' : 'Result copied!');
+                              } catch(e) {
+                                setDisplay(h.result);
+                              }
+                            }}
+                            title="Copy result"
+                          >
+                            {h.result}
+                            <Copy className="w-3 h-3 text-slate-300 hover:text-indigo-600 inline opacity-0 group-hover:opacity-100 transition-all ml-1" />
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-6 pt-4 border-t border-slate-200/50 text-[11px] text-slate-400 text-center font-medium bg-white/40 p-2.5 rounded-xl">
+                  {settings.systemLanguage === 'bn'
+                    ? 'কীবোর্ড সাপোর্ট সক্রিয়: টাইপ করতে পারেন।'
+                    : 'Full Keyboard inputs active for raw typing speed.'}
+                </div>
               </div>
-            )}
-
-            <div className="bg-gray-900 p-8 rounded-[2rem] mb-8 text-right shadow-2xl flex flex-col justify-end overflow-hidden group min-h-[200px] relative">
-              <div className="absolute top-4 left-4">
-                 <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.5)]"></div>
-              </div>
-              {lastEquation && (
-                <div className="text-xs text-indigo-300/50 font-mono font-bold mb-2 opacity-60 group-hover:opacity-100 transition-opacity break-all tracking-wider">{lastEquation} =</div>
-              )}
-              <p className={`font-mono font-black text-white break-all tracking-tighter transition-all duration-300 ${
-                display.length > 200 ? 'text-[9px] leading-[1.1]' : 
-                display.length > 120 ? 'text-[11px] leading-tight' : 
-                display.length > 60 ? 'text-sm leading-tight' : 
-                display.length > 30 ? 'text-xl' : 
-                display.length > 15 ? 'text-3xl' : 'text-6xl'
-              } ${display === 'Error' ? 'text-red-400' : ''}`}>
-                {display}
-              </p>
-            </div>
-
-            <div className="grid grid-cols-4 gap-3 sm:gap-4">
-              {[
-                { val: 'C', color: 'bg-rose-50 text-rose-600 hover:bg-rose-100 border-rose-100' },
-                { val: 'del', icon: <Delete className="w-6 h-6" />, color: 'bg-orange-50 text-orange-600 hover:bg-orange-100 border-orange-100' },
-                { val: '(', color: 'bg-indigo-50/50 text-indigo-600' },
-                { val: ')', color: 'bg-indigo-50/50 text-indigo-600' },
-                
-                { val: '7' }, { val: '8' }, { val: '9' }, { val: '/', color: 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-100' },
-                
-                { val: '4' }, { val: '5' }, { val: '6' }, { val: '*', color: 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-100' },
-                
-                { val: '1' }, { val: '2' }, { val: '3' }, { val: '-', color: 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-100' },
-                
-                { val: '0', color: 'col-span-2' }, { val: '.' }, { val: '+', color: 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-100' },
-                
-                { val: '=', color: 'col-span-4 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white hover:shadow-xl hover:shadow-indigo-200 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] transition-all h-20 sm:h-24 mt-2' },
-              ].map((btn, i) => (
-                <button
-                  key={i}
-                  onClick={() => handleAction(btn.val)}
-                  className={`h-16 sm:h-20 rounded-3xl font-black text-xl transition-all active:scale-90 shadow-sm border border-transparent flex items-center justify-center ${
-                    btn.color || 'bg-gray-50 border-gray-100 text-gray-900 hover:bg-white hover:shadow-md'
-                  } ${btn.val === '0' ? 'col-span-2' : ''} ${btn.val === '=' ? 'col-span-4' : ''}`}
-                >
-                  {btn.icon || btn.val}
-                </button>
-              ))}
-            </div>
-            
-            <div className="mt-8 flex justify-center">
-               <div className="h-1.5 w-16 bg-gray-100 rounded-full"></div>
-            </div>
-          </motion.div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </>
