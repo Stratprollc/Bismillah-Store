@@ -343,6 +343,18 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
             <span>{selectedShop.name}</span>
           </div>
         )}
+
+        {/* Merchant Login CTA on shop selection */}
+        {stage === 'shop_selection' && (
+          <button
+            type="button"
+            onClick={onBack}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-xl text-xs font-black transition-all border border-indigo-100/50"
+          >
+            <User className="w-3.5 h-3.5" />
+            <span>{isBn ? "মার্চেন্ট লগইন" : "Merchant Login"}</span>
+          </button>
+        )}
       </header>
 
       {/* Main Container */}

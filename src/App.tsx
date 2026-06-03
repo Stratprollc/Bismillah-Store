@@ -2814,21 +2814,41 @@ function RecycleBin({ items, onRestore }: { items: any[], onRestore: (item: any)
 }
 
 function ShopManagement({ shops }: { shops: any[] }) {
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const filteredShops = shops.filter(shop => 
+    (shop.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (shop.ownerEmail || shop.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (shop.shopCode || '').toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-end mb-8">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
         <div>
           <h2 className="text-3xl font-black text-gray-900 uppercase tracking-tight">Merchant Network Console</h2>
           <p className="text-gray-400 font-bold uppercase text-[10px] tracking-widest mt-1">Manage and Monitor all business partners</p>
         </div>
-        <div className="bg-indigo-50 px-4 py-2 rounded-xl border border-indigo-100">
-          <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">Total Shops</p>
-          <p className="text-xl font-black text-indigo-600 font-mono">{shops.length}</p>
+        <div className="flex items-center gap-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+            <input 
+              type="text" 
+              placeholder="Search by name, email or code..."
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              className="pl-10 pr-4 py-2 border border-gray-200 rounded-xl outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 w-full md:w-64"
+            />
+          </div>
+          <div className="bg-indigo-50 px-4 py-2 rounded-xl border border-indigo-100 whitespace-nowrap">
+            <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">Total Shops</p>
+            <p className="text-xl font-black text-indigo-600 font-mono">{filteredShops.length}</p>
+          </div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {shops.map((shop, idx) => (
+        {filteredShops.map((shop, idx) => (
           <motion.div 
             key={idx}
             initial={{ opacity: 0, y: 20 }}
@@ -3138,7 +3158,28 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
   const [loginMode, setLoginMode] = useState<'merchant' | 'staff'>('merchant');
-  const [showCustomerPortal, setShowCustomerPortal] = useState<boolean>(false);
+  
+  const isLoginPath = () => {
+    const path = window.location.pathname.toLowerCase();
+    return path.includes('login');
+  };
+
+  const [showCustomerPortal, setShowCustomerPortal] = useState<boolean>(() => {
+    return !isLoginPath();
+  });
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setShowCustomerPortal(!isLoginPath());
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  const handleSetShowCustomerPortal = (show: boolean) => {
+    setShowCustomerPortal(show);
+    window.history.pushState({}, '', show ? '/' : '/login');
+  };
 
   // Auth State Sync
   useEffect(() => {
@@ -4478,7 +4519,7 @@ export default function App() {
   if (showCustomerPortal) {
     return (
       <CustomerPortal 
-        onBack={() => setShowCustomerPortal(false)} 
+        onBack={() => handleSetShowCustomerPortal(false)} 
         lang={shopSettings.systemLanguage || 'bn'} 
       />
     );
@@ -4677,7 +4718,7 @@ export default function App() {
               <div className="mt-8 border-t border-gray-100 pt-6">
                 <button
                   type="button"
-                  onClick={() => setShowCustomerPortal(true)}
+                  onClick={() => handleSetShowCustomerPortal(true)}
                   className="w-full h-14 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 text-indigo-700 rounded-2xl font-black transition-all flex items-center justify-center gap-2.5 group"
                 >
                   <Sparkles className="w-5 h-5 text-indigo-600 group-hover:scale-110 transition-transform" />
@@ -5617,7 +5658,7 @@ function PerformanceChart({ chartData, viewMetric, primaryColor }: { chartData: 
   
   return (
     <div className="w-full h-[350px]">
-      <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+      <ResponsiveContainer width="100%" height={350}>
         <BarChart data={chartData}>
           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
           <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 11}} />
