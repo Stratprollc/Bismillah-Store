@@ -22,6 +22,7 @@
     "esbuild": "^0.28.0",
     "express": "^5.2.1",
     "firebase": "^12.10.0",
+    "html5-qrcode": "^2.3.8",
     "idb": "^8.0.3",
     "jspdf": "^2.5.2",
     "jspdf-autotable": "^3.8.4",

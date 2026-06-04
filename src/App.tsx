@@ -1,5 +1,6 @@
 // @ts-nocheck
 import React, { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react';
+import { Html5Qrcode } from 'html5-qrcode';
 import { ShopOnboarding } from './components/ShopOnboarding';
 import { useVoiceSearch } from './hooks/useVoiceSearch';
 import { standardizeBn, toPhonetic, parseVoiceCommandQuantity, isPhoneticMatch, parseNewProductVoiceCommand, formatToBnDate } from './utils/voiceUtils';
@@ -119,6 +120,7 @@ import { JarvisAI } from './components/JarvisAI';
 import { NetworkConsole } from './components/NetworkConsole';
 import { CustomerPortal } from './components/CustomerPortal';
 import { SellerOrdersView } from './components/SellerOrdersView';
+import Dashboard from './components/Dashboard';
 
 import { fuzzyMatchProduct } from './utils/productMatcher';
 import { motion, AnimatePresence } from 'motion/react';
@@ -2931,9 +2933,28 @@ export default function App() {
   useEffect(() => {
     console.log("ShopMaster App Initializing...");
   }, []);
-  const [user, setUser] = useState<any>(null);
-  const [isOnboarded, setIsOnboarded] = useState<boolean | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [user, setUser] = useState<any>(() => {
+    try {
+      const saved = localStorage.getItem('shopmaster_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null;
+    }
+  });
+  const [isOnboarded, setIsOnboarded] = useState<boolean | null>(() => {
+    try {
+      const saved = localStorage.getItem('shopmaster_user');
+      if (saved) {
+        const u = JSON.parse(saved);
+        if (u.role === 'admin' && u.shopId === 'master') {
+          return true;
+        }
+        return u.isOnboarded !== undefined ? !!u.isOnboarded : null;
+      }
+    } catch (e) {}
+    return null;
+  });
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
@@ -3181,6 +3202,12 @@ export default function App() {
   };
 
   const [showCustomerPortal, setShowCustomerPortal] = useState<boolean>(() => {
+    try {
+      const hasCachedUser = !!localStorage.getItem('shopmaster_user');
+      if (hasCachedUser) {
+        return false;
+      }
+    } catch (e) {}
     return !isLoginPath();
   });
 
@@ -3201,8 +3228,12 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setLoading(true);
+      // Synchronously reset previous user's data state to avoid any transient data rendering
+      resetStateToDefaults();
+      
       if (firebaseUser && !firebaseUser.isAnonymous) {
         // Authenticated real user
+        setShowCustomerPortal(false);
         const isMaster = firebaseUser.email?.toLowerCase().trim() === 'stratproamz@gmail.com';
         
         if (isMaster) {
@@ -3211,9 +3242,11 @@ export default function App() {
             email: firebaseUser.email || '',
             displayName: 'Master Admin',
             role: 'admin',
-            shopId: 'master'
+            shopId: 'master',
+            isOnboarded: true
           };
           setUser(userData);
+          setIsOnboarded(true);
           localStorage.setItem('shopmaster_user', JSON.stringify(userData));
         } else {
           // Check if it's a staff member (in users collection) or a merchant
@@ -3226,20 +3259,56 @@ export default function App() {
                 email: firebaseUser.email || '',
                 displayName: data.displayName || data.username || 'Staff',
                 role: data.role || 'sales_team',
-                shopId: data.shopId
+                shopId: data.shopId,
+                isOnboarded: true
               };
               setUser(userData);
+              setIsOnboarded(true);
               localStorage.setItem('shopmaster_user', JSON.stringify(userData));
             } else {
               // Might be a Merchant (logged in via Google or first time)
+              let finalShopId = firebaseUser.uid;
+              let onboardStatus = false;
+
+              try {
+                // 1. Direct match: doc ID is firebaseUser.uid
+                const shopDoc = await getDoc(doc(db, 'shops', firebaseUser.uid));
+                if (shopDoc.exists()) {
+                  finalShopId = firebaseUser.uid;
+                  onboardStatus = true;
+                } else {
+                  // 2. Try searching by ownerUid
+                  const qByUid = query(collection(db, 'shops'), where('ownerUid', '==', firebaseUser.uid));
+                  const snapByUid = await getDocs(qByUid);
+                  if (!snapByUid.empty) {
+                    const foundShop = snapByUid.docs[0];
+                    finalShopId = foundShop.id;
+                    onboardStatus = true;
+                  } else if (firebaseUser.email) {
+                    // 3. Try searching by ownerEmail
+                    const qByEmail = query(collection(db, 'shops'), where('ownerEmail', '==', firebaseUser.email));
+                    const snapByEmail = await getDocs(qByEmail);
+                    if (!snapByEmail.empty) {
+                      const foundShop = snapByEmail.docs[0];
+                      finalShopId = foundShop.id;
+                      onboardStatus = true;
+                    }
+                  }
+                }
+              } catch (shopSearchErr) {
+                console.error("Error searching shops during login setup:", shopSearchErr);
+              }
+
               const userData = {
                 uid: firebaseUser.uid,
                 email: firebaseUser.email || '',
                 displayName: firebaseUser.displayName || 'Merchant',
                 role: 'admin',
-                shopId: firebaseUser.uid // Merchants use their UID as shopId
+                shopId: finalShopId,
+                isOnboarded: onboardStatus
               };
               setUser(userData);
+              setIsOnboarded(onboardStatus);
               localStorage.setItem('shopmaster_user', JSON.stringify(userData));
             }
           } catch (err) {
@@ -3250,14 +3319,17 @@ export default function App() {
               email: firebaseUser.email || '',
               displayName: firebaseUser.displayName || 'User',
               role: 'sales_team',
-              shopId: firebaseUser.uid
+              shopId: firebaseUser.uid,
+              isOnboarded: false
             };
             setUser(userData);
+            setIsOnboarded(false);
           }
         }
       } else {
         // Logged out or Anonymous
         setUser(null);
+        setIsOnboarded(null);
       }
       setLoading(false);
     });
@@ -3337,6 +3409,11 @@ export default function App() {
       });
 
       setIsOnboarded(true);
+      if (user) {
+        const updatedUser = { ...user, isOnboarded: true };
+        setUser(updatedUser);
+        localStorage.setItem('shopmaster_user', JSON.stringify(updatedUser));
+      }
       setNotification({ message: 'Shop setup complete!', type: 'success' });
     } catch (error) {
       console.error(error);
@@ -3398,6 +3475,44 @@ export default function App() {
     jarvisVoiceGender: 'male',
   });
 
+  function resetStateToDefaults() {
+    setIsOnboarded(null);
+    setAppUsers([]);
+    setProducts([]);
+    setSales([]);
+    setCustomers([]);
+    setCategories([]);
+    setCustomerOrders([]);
+    setEmployees([]);
+    setExpenses([]);
+    setInvestments([]);
+    setStaffSalaries([]);
+    setDailyClosings([]);
+    setRecycleBin([]);
+    setCustomerLogs([]);
+    setDuePayments([]);
+    setNotes([]);
+    setStockRecords([]);
+    setShopSettings({
+      name: 'Bismillah Store',
+      platformTitle: 'Bismillah Store - ShopMaster',
+      address: 'Your Shop Address',
+      phone: '',
+      receiptWidth: '58mm',
+      receiptFooter: "Thank you for shopping with us!\nPowered by ShopMaster",
+      waGatewayType: 'manual',
+      autoSendWhatsApp: false,
+      aiWhatsAppEnabled: false,
+      waTemplateEnglish: "Hello *{{customerName}}*, thank you for shopping at *{{shopName}}*! Your invoice #{{invoiceId}} total is {{currencySymbol}} {{totalAmount}}.",
+      waTemplateBengali: "প্রিয় *{{customerName}}*, *{{shopName}}*-এ কেনাকাটা করার জন্য ধন্যবাদ! আপনার ইনভয়েস #{{invoiceId}} এর মোট পরিমাণ {{currencySymbol}} {{totalAmount}} টাকা।",
+      printLanguage: 'bn',
+      systemLanguage: 'bn',
+      currencySymbol: 'TK',
+      jarvisLanguage: 'bn',
+      jarvisVoiceGender: 'male',
+    });
+  }
+
   const [prevPendingCount, setPrevPendingCount] = useState<number>(0);
   useEffect(() => {
     const pendingCount = customerOrders.filter(o => o.status === 'pending').length;
@@ -3419,20 +3534,61 @@ export default function App() {
     setPrevPendingCount(pendingCount);
   }, [customerOrders, prevPendingCount, shopSettings.systemLanguage]);
 
+  // Check onboarding status in Firestore as a fallback if not determined yet
   useEffect(() => {
-    // Master admin doesn't need to onboard
+    if (!user) {
+      setIsOnboarded(null);
+      return;
+    }
+
     if (isMasterAdmin) {
       setIsOnboarded(true);
       return;
     }
-    
-    // If shop name is default, consider not onboarded
-    if (shopSettings.name === 'Bismillah Store' || !shopSettings.name) {
-      setIsOnboarded(false);
-    } else {
-      setIsOnboarded(true);
-    }
-  }, [shopSettings, isMasterAdmin]);
+
+    if (isOnboarded !== null) return; // Already resolved synchronously or via auth state changed!
+
+    const checkOnboardingFallback = async () => {
+      try {
+        const shopDoc = await getDoc(doc(db, 'shops', user.shopId));
+        if (shopDoc.exists()) {
+          setIsOnboarded(true);
+          const updatedUser = { ...user, isOnboarded: true };
+          localStorage.setItem('shopmaster_user', JSON.stringify(updatedUser));
+          return;
+        }
+
+        const qByUid = query(collection(db, 'shops'), where('ownerUid', '==', user.uid));
+        const snapByUid = await getDocs(qByUid);
+        if (!snapByUid.empty) {
+          const foundShop = snapByUid.docs[0];
+          const updatedUser = { ...user, shopId: foundShop.id, isOnboarded: true };
+          setUser(updatedUser);
+          localStorage.setItem('shopmaster_user', JSON.stringify(updatedUser));
+          setIsOnboarded(true);
+          return;
+        }
+
+        if (user.email) {
+          const qByEmail = query(collection(db, 'shops'), where('ownerEmail', '==', user.email));
+          const snapByEmail = await getDocs(qByEmail);
+          if (!snapByEmail.empty) {
+            const foundShop = snapByEmail.docs[0];
+            const updatedUser = { ...user, shopId: foundShop.id, isOnboarded: true };
+            setUser(updatedUser);
+            localStorage.setItem('shopmaster_user', JSON.stringify(updatedUser));
+            setIsOnboarded(true);
+            return;
+          }
+        }
+
+        setIsOnboarded(false);
+      } catch (err) {
+        console.error("Error checking onboarding status falling back:", err);
+      }
+    };
+    checkOnboardingFallback();
+  }, [user, isMasterAdmin, isOnboarded]);
 
   const handleDownloadCustomersCSV = () => {
     const csvData = customers.map(c => ({
@@ -3540,9 +3696,24 @@ export default function App() {
 
   useEffect(() => {
     (window as any)._currentShopId = user?.shopId || null;
-    // These require the user to be logged in to determine the shopId
-    if (!user || !user.shopId) {
+    
+    if (!user || !user.shopId || (!isMasterAdmin && isOnboarded !== true)) {
       setAppUsers([]);
+      setProducts([]);
+      setSales([]);
+      setCustomers([]);
+      setCategories([]);
+      setCustomerOrders([]);
+      setEmployees([]);
+      setExpenses([]);
+      setInvestments([]);
+      setStaffSalaries([]);
+      setDailyClosings([]);
+      setRecycleBin([]);
+      setCustomerLogs([]);
+      setDuePayments([]);
+      setNotes([]);
+      setStockRecords([]);
       setShopSettings({
         name: 'Bismillah Store',
         platformTitle: 'Bismillah Store - ShopMaster',
@@ -3581,8 +3752,18 @@ export default function App() {
       setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product)));
     }, (err) => console.error("Products sync error", err));
 
-    const unsubSales = onSnapshot(query(collection(db, 'sales'), where('shopId', '==', currentShopId), orderBy('timestamp', 'desc'), limit(100)), (snapshot) => {
-      setSales(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Sale)));
+    const unsubSales = onSnapshot(query(collection(db, 'sales'), where('shopId', '==', currentShopId)), (snapshot) => {
+      const fetchedSales = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Sale));
+      fetchedSales.sort((a, b) => {
+        const getMs = (ts: any) => {
+          if (!ts) return 0;
+          if (typeof ts.toDate === 'function') return ts.toDate().getTime();
+          if (ts.seconds) return ts.seconds * 1000;
+          return new Date(ts).getTime() || 0;
+        };
+        return getMs(b.timestamp) - getMs(a.timestamp);
+      });
+      setSales(fetchedSales.slice(0, 100));
     }, (err) => console.error("Sales sync error", err));
 
     const unsubStock = onSnapshot(query(collection(db, 'stockRecords'), where('shopId', '==', currentShopId)), (snapshot) => {
@@ -3629,8 +3810,18 @@ export default function App() {
       setDuePayments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DuePayment)));
     }, (err) => console.error("Due payments sync error", err));
 
-    const unsubNotes = onSnapshot(query(collection(db, 'notes'), where('shopId', '==', currentShopId), orderBy('timestamp', 'desc')), (snapshot) => {
-      setNotes(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Note)));
+    const unsubNotes = onSnapshot(query(collection(db, 'notes'), where('shopId', '==', currentShopId)), (snapshot) => {
+      const fetchedNotes = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Note));
+      fetchedNotes.sort((a, b) => {
+        const getMs = (ts: any) => {
+          if (!ts) return 0;
+          if (typeof ts.toDate === 'function') return ts.toDate().getTime();
+          if (ts.seconds) return ts.seconds * 1000;
+          return new Date(ts).getTime() || 0;
+        };
+        return getMs(b.timestamp) - getMs(a.timestamp);
+      });
+      setNotes(fetchedNotes);
     }, (err) => console.error("Notes sync error", err));
 
     const unsubCustomerOrders = onSnapshot(query(collection(db, 'customer_orders'), where('shopId', '==', currentShopId)), (snapshot) => {
@@ -3656,7 +3847,7 @@ export default function App() {
       unsubNotes();
       unsubCustomerOrders();
     };
-  }, [user, auth.currentUser]);
+  }, [user, isMasterAdmin, isOnboarded]);
 
   const handleAddNote = async (text: string, color: string, extra?: { priority?: string, dueDate?: string }) => {
     try {
@@ -3729,6 +3920,7 @@ export default function App() {
       await signOut(auth);
     } catch(e) {}
     setUser(null);
+    resetStateToDefaults();
     localStorage.removeItem('shopmaster_user');
   };
 
@@ -3744,15 +3936,54 @@ export default function App() {
       // Merchants logging in via Google who are not registered staff should get 'admin' role by default
       const role = isMasterAdmin ? 'admin' : (existingAppUser?.role || 'admin');
       
+      let finalShopId = googleUser.uid;
+      let onboardStatus = false;
+
+      if (isMasterAdmin) {
+        finalShopId = 'master';
+        onboardStatus = true;
+      } else {
+        try {
+          // 1. Direct match: doc ID is firebaseUser.uid
+          const shopDoc = await getDoc(doc(db, 'shops', googleUser.uid));
+          if (shopDoc.exists()) {
+            finalShopId = googleUser.uid;
+            onboardStatus = true;
+          } else {
+            // 2. Try searching by ownerUid
+            const qByUid = query(collection(db, 'shops'), where('ownerUid', '==', googleUser.uid));
+            const snapByUid = await getDocs(qByUid);
+            if (!snapByUid.empty) {
+              const foundShop = snapByUid.docs[0];
+              finalShopId = foundShop.id;
+              onboardStatus = true;
+            } else if (googleUser.email) {
+              // 3. Try searching by ownerEmail
+              const qByEmail = query(collection(db, 'shops'), where('ownerEmail', '==', googleUser.email));
+              const snapByEmail = await getDocs(qByEmail);
+              if (!snapByEmail.empty) {
+                const foundShop = snapByEmail.docs[0];
+                finalShopId = foundShop.id;
+                onboardStatus = true;
+              }
+            }
+          }
+        } catch (shopSearchErr) {
+          console.error("Error searching shops during Google Login:", shopSearchErr);
+        }
+      }
+
       const userData = { 
         uid: googleUser.uid, 
         email: googleUser.email || '', 
         displayName: googleUser.displayName || googleUser.email?.split('@')[0] || 'Google User', 
         role,
-        shopId: googleUser.uid
+        shopId: finalShopId,
+        isOnboarded: onboardStatus
       };
       
       setUser(userData);
+      setIsOnboarded(onboardStatus);
       localStorage.setItem('shopmaster_user', JSON.stringify(userData));
       setNotification({ message: `Signed in as ${userData.displayName}`, type: 'success' });
     } catch (error: any) {
@@ -4520,7 +4751,7 @@ export default function App() {
   (window as any)._globalCurrencySymbol = dynamicSettings.currencySymbol || 'TK';
   (window as any)._globalLang = systemLang;
 
-  if (loading) {
+  if (loading || (user && isOnboarded === null)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <motion.div 
@@ -4532,7 +4763,7 @@ export default function App() {
     );
   }
 
-  if (showCustomerPortal) {
+  if (showCustomerPortal && !user) {
     return (
       <CustomerPortal 
         onBack={() => handleSetShowCustomerPortal(false)} 
@@ -5535,7 +5766,7 @@ export default function App() {
                 <CheckCircle2 className="w-10 h-10 text-green-600" />
               </div>
               <h2 className="text-2xl font-bold text-gray-900 mb-2">Order Successful!</h2>
-              <p className="text-gray-500 mb-8">Invoice #{lastCompletedSale.id} has been generated.</p>
+              <p className="text-gray-500 mb-8">Order #{lastCompletedSale.id} has been generated.</p>
               
               <div className="grid grid-cols-1 gap-3">
                 <button 
@@ -5598,7 +5829,66 @@ export default function App() {
 
 // --- Sub-components ---
 
-function BarcodeScanner({ onScan, onClose }: { onScan: (data: string) => void, onClose: () => void }) {
+function BarcodeScanner({ onScan, onClose }: { onScan: (data: string) => void; onClose: () => void }) {
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [manualCode, setManualCode] = useState('');
+
+  useEffect(() => {
+    let html5Qrcode: Html5Qrcode | null = null;
+    let isStarted = false;
+
+    const startScanner = async () => {
+      try {
+        // Wait a tiny bit to make sure container div is in the DOM
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        
+        const container = document.getElementById("reader");
+        if (!container) return;
+
+        html5Qrcode = new Html5Qrcode("reader");
+        isStarted = true;
+
+        await html5Qrcode.start(
+          { facingMode: "environment" },
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+          },
+          (decodedText) => {
+            onScan(decodedText);
+            if (html5Qrcode) {
+              html5Qrcode.stop().catch((err) => console.error("Error stopping html5-qrcode on scan:", err));
+            }
+            onClose();
+          },
+          (errorMessage) => {
+            // Quietly ignore verbose camera scanning frame matching failures
+          }
+        );
+      } catch (err: any) {
+        console.error("Camera scanner error:", err);
+        setErrorMsg(err?.message || "Could not access the camera. Please type the barcode manually.");
+      }
+    };
+
+    startScanner();
+
+    return () => {
+      if (html5Qrcode) {
+        if (html5Qrcode.isScanning) {
+          html5Qrcode.stop().catch((err) => console.error("Error stopping html5-qrcode on unmount:", err));
+        }
+      }
+    };
+  }, [onScan, onClose]);
+
+  const handleManualSubmit = () => {
+    if (manualCode.trim()) {
+      onScan(manualCode.trim());
+      onClose();
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
       <div className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl">
@@ -5611,9 +5901,39 @@ function BarcodeScanner({ onScan, onClose }: { onScan: (data: string) => void, o
             <X className="w-5 h-5" />
           </button>
         </div>
-        <div id="reader" className="w-full h-64 bg-black"></div>
-        <div className="p-6 bg-gray-50 text-center">
-          <p className="text-sm text-gray-500">Position the barcode within the frame to scan</p>
+        
+        <div className="relative bg-black min-h-64 flex flex-col items-center justify-center text-white">
+          <div id="reader" className="w-full h-64"></div>
+          {errorMsg && (
+            <div className="absolute inset-0 bg-gray-900/90 flex flex-col items-center justify-center p-6 text-center">
+              <AlertTriangle className="w-12 h-12 text-amber-500 mb-2" />
+              <p className="text-sm font-bold max-w-xs">{errorMsg}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="p-6 bg-gray-50 flex flex-col gap-4 text-center">
+          <p className="text-xs text-gray-500 font-medium">Position the barcode within the camera frame or enter it below:</p>
+          <div className="flex gap-2">
+            <input 
+              type="text"
+              placeholder="Enter Barcode manually..."
+              value={manualCode}
+              onChange={(e) => setManualCode(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleManualSubmit();
+                }
+              }}
+              className="flex-1 px-4 py-3 bg-white border border-gray-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
+            />
+            <button 
+              onClick={handleManualSubmit}
+              className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all shadow-md"
+            >
+              Submit
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -5667,163 +5987,6 @@ function NotificationToast({ notification, onClose }: {
   );
 }
 
-
-function PerformanceChart({ chartData, viewMetric, primaryColor }: { chartData: any[], viewMetric: 'revenue' | 'profit', primaryColor: string }) {
-  // Stabilize chart color
-  const barFill = primaryColor === 'blue-600' ? '#2563eb' : (primaryColor === 'emerald-600' ? '#10b981' : '#2563eb');
-  
-  return (
-    <div className="w-full h-[350px]">
-      <ResponsiveContainer width="100%" height={350}>
-        <BarChart data={chartData}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-          <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 11}} />
-          <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 11}} />
-          <Tooltip 
-            cursor={{fill: '#f8fafc'}}
-            contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
-          />
-          <Bar 
-            dataKey={viewMetric === 'revenue' ? 'sales' : 'profit'} 
-            radius={[8, 8, 0, 0]} 
-            fill={barFill}
-            animationDuration={1500}
-          />
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
-
-function Dashboard({ products, sales, customers, expenses, dailyClosings, settings, onDelete, onViewProductHistory, isOnline, user, expiringProducts = [], period, setPeriod, viewMetric, setViewMetric }: { products: Product[], sales: Sale[], customers: Customer[], expenses: Expense[], dailyClosings: DailyClosing[], settings: ShopSettings, onDelete: (closing: DailyClosing) => void, onViewProductHistory: (p: Product) => void, isOnline: boolean, user: any, expiringProducts?: Product[], period: 'day' | 'week' | 'month' | 'year', setPeriod: (p: 'day' | 'week' | 'month' | 'year') => void, viewMetric: 'revenue' | 'profit', setViewMetric: (v: 'revenue' | 'profit') => void }) {
-  console.log("Dashboard rendering", { period, viewMetric });
-  const systemLang = settings.systemLanguage || 'bn';
-  const st = (key: keyof typeof SYSTEM_TRANSLATIONS['en']) => (SYSTEM_TRANSLATIONS[systemLang] as any)[key] || (SYSTEM_TRANSLATIONS['en'] as any)[key];
-
-  const theme = { gradient: 'from-blue-600 to-indigo-600', bg: 'bg-blue-100', primary: 'blue-600', shadow: 'shadow-blue-500/20' };
-  const fC = (num: number) => {
-    const symbol = settings.currencySymbol || 'TK';
-    const lang = settings.systemLanguage || 'bn';
-    return formatCurrency(num, symbol, lang);
-  };
-  const safeDate = (date: any) => new Date(date);
-
-  const now = useMemo(() => new Date(), [period]);
-  const lastClosingDate = useMemo(() => {
-    if (!dailyClosings || dailyClosings.length === 0) return null;
-    const sorted = [...dailyClosings].sort((a, b) => safeDate(b.timestamp).getTime() - safeDate(a.timestamp).getTime());
-    return safeDate(sorted[0].timestamp).getTime();
-  }, [dailyClosings]);
-
-  const filteredSales = useMemo(() => {
-    return sales.filter(s => {
-      const saleDate = safeDate(s.timestamp);
-      const saleTime = saleDate.getTime();
-      return true; // Simplified for robustness
-    });
-  }, [sales, period, lastClosingDate, now]);
-
-  const totalSales = useMemo(() => filteredSales.reduce((sum, s) => sum + (s.finalAmount || 0), 0), [filteredSales]);
-  const totalCost = useMemo(() => filteredSales.reduce((sum, s) => sum + s.items.reduce((itemSum, item) => itemSum + ((item.cost || 0) * item.quantity), 0), 0), [filteredSales]);
-  
-  const grossProfit = totalSales - totalCost;
-  const netProfit = grossProfit; // Simplified
-  
-  const totalMarketDue = useMemo(() => customers.reduce((sum, c) => sum + (c.currentDue || 0), 0), [customers]);
-  
-  const chartData = useMemo(() => {
-      // Return a basic mock structure to ensure chart renders
-      return Array.from({ length: 7 }, (_, i) => ({ name: `Day ${i+1}`, sales: Math.random() * 100, profit: Math.random() * 50 }));
-  }, [filteredSales, period]);
-
-  const stats = useMemo(() => ({ todayCash: 0, todayDue: 0, periodCash: totalSales, periodDue: totalMarketDue }), [totalSales, totalMarketDue]);
-
-  const itemVariants = {
-    hidden: { opacity: 0, y: 20 },
-    visible: { opacity: 1, y: 0 }
-  };
-
-  return (
-    <motion.div 
-      variants={{
-        hidden: { opacity: 0 },
-        visible: { opacity: 1, transition: { staggerChildren: 0.1 } }
-      }}
-      initial="hidden"
-      animate="visible"
-      className="space-y-10 pb-10"
-    >
-      {/* ... header ... */}
-      
-      {/* ... expiring products ... */}
-      
-      {/* ... stats cards ... */}
-
-      <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-lg shadow-gray-200/50">
-          <div className="flex items-center justify-between mb-8">
-            <h3 className="text-xl font-black text-gray-900 tracking-tight">Performance Chart</h3>
-            <div className="flex gap-2">
-              {/* ... buttons ... */}
-            </div>
-          </div>
-          <div className="h-[350px] w-full min-h-[300px] min-w-0 overflow-hidden">
-            <PerformanceChart 
-              chartData={chartData} 
-              viewMetric={viewMetric} 
-              primaryColor={theme.primary} 
-            />
-          </div>
-        </div>
-        {/* ... remaining code ... */}
-
-        <div className="space-y-8">
-          <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm">
-            <h3 className="text-xl font-black text-gray-900 tracking-tight mb-6">Inventory Health</h3>
-            <div className="space-y-6">
-              <div className="flex items-center justify-between p-5 bg-orange-50 rounded-3xl border border-orange-100 shadow-sm">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-white rounded-2xl shadow-sm flex items-center justify-center">
-                    <Package className="w-6 h-6 text-orange-600" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-bold text-orange-900">Low Stock</p>
-                    <p className="text-xs text-orange-400 font-semibold">Action needed</p>
-                  </div>
-                </div>
-                <span className="text-2xl font-black text-orange-600">{products.filter(p => p.stock > 0 && p.stock < 10).length}</span>
-              </div>
-              <div className="flex items-center justify-between p-5 bg-red-50 rounded-3xl border border-red-100 shadow-sm">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-white rounded-2xl shadow-sm flex items-center justify-center">
-                    <AlertTriangle className="w-6 h-6 text-red-600" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-bold text-red-900">Out of Stock</p>
-                    <p className="text-xs text-red-400 font-semibold">Critical issue</p>
-                  </div>
-                </div>
-                <span className="text-2xl font-black text-red-600">{products.filter(p => p.stock <= 0).length}</span>
-              </div>
-            </div>
-          </div>
-
-          <div className={`bg-${theme.primary} p-8 rounded-[2.5rem] shadow-xl ${theme.shadow} relative overflow-hidden group`}>
-            <div className="absolute top-0 right-0 -m-8 w-32 h-32 bg-white/10 rounded-full blur-2xl group-hover:bg-white/20 transition-all duration-700"></div>
-            <div className="relative z-10 text-white">
-              <h3 className="text-lg font-bold mb-2">Total Receivables</h3>
-              <p className="text-4xl font-black mb-4 tracking-tight">{fC(totalMarketDue)}</p>
-              <div className="flex items-center gap-2 text-white/80 text-sm bg-white/10 w-fit px-4 py-1.5 rounded-xl border border-white/10 backdrop-blur-sm">
-                <Users className="w-4 h-4" />
-                <span className="font-bold uppercase tracking-wider text-[10px]">Collectibles</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </motion.div>
-    </motion.div>
-  );
-}
 
 function AlertBox({ icon: Icon, label, count, color, bgColor, items, onItemClick }: any) {
   return (
@@ -7958,7 +8121,7 @@ function BarcodePage({ products, settings }: { products: Product[], settings: Sh
               <div className="w-full h-1 bg-gray-50 rounded-full overflow-hidden">
                 <div 
                   className="h-full bg-violet-500" 
-                  style={{ width: `${(products.filter(p => !!p.barcode).length / products.length) * 100}%` }}
+                  style={{ width: `${products.length > 0 ? (products.filter(p => !!p.barcode).length / products.length) * 100 : 0}%` }}
                 ></div>
               </div>
               <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest opacity-60 leading-relaxed">
@@ -11130,8 +11293,10 @@ Return the result as JSON with a "category" field containing exactly one string 
                         className="w-full px-4 py-4 rounded-xl border-2 border-gray-100 focus:border-indigo-500 focus:ring-0 outline-none font-semibold text-gray-700"
                       >
                         <option value="">Select Category</option>
-                        {filteredCategories.map(cat => (
-                          <option key={cat} value={cat}>{cat}</option>
+                        {categories
+                          .filter(c => c.name.toLowerCase().includes((categorySearch || '').toLowerCase()))
+                          .map(cat => (
+                          <option key={cat.id} value={cat.name}>{cat.name}</option>
                         ))}
                       </select>
                     </div>
