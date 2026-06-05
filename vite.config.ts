@@ -10,12 +10,11 @@ export default defineConfig(({mode}) => {
     plugins: [
       react(), 
       tailwindcss(),
-      VitePWA({
+      /*VitePWA({
         registerType: 'autoUpdate',
         devOptions: {
           enabled: true
         },
-        includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
         workbox: {
           maximumFileSizeToCacheInBytes: 5000000
         },
@@ -24,29 +23,12 @@ export default defineConfig(({mode}) => {
           short_name: 'ShopMaster',
           description: 'Super Shop Management System with AI Intelligence',
           theme_color: '#ffffff',
-          icons: [
-            {
-              src: 'pwa-192x192.png',
-              sizes: '192x192',
-              type: 'image/png'
-            },
-            {
-              src: 'pwa-512x512.png',
-              sizes: '512x512',
-              type: 'image/png'
-            },
-            {
-              src: 'pwa-512x512.png',
-              sizes: '512x512',
-              type: 'image/png',
-              purpose: 'any maskable'
-            }
-          ]
+          icons: []
         }
-      })
+      })*/
     ],
     define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+      // 'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
     },
     build: {
       outDir: 'dist',

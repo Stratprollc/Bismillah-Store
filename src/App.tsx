@@ -8,6 +8,7 @@ import { parseMathVoiceCommandAI } from './utils/mathVoiceParser';
 import { parsePosVoiceCommandAI } from './utils/aiVoiceParser';
 import { addToSyncQueue, getSyncQueue, removeFromSyncQueue } from './utils/offlineDb';
 import { 
+  CheckSquare,
   LayoutDashboard, 
   Bot,
   ChevronLeft,
@@ -170,7 +171,7 @@ import {
   ResponsiveContainer
 } from 'recharts';
 import { format, isPast } from 'date-fns';
-import { GoogleGenAI, Type } from "@google/genai";
+// Google GenAI support moved to server proxy
 import ReactBarcode from 'react-barcode';
 import QRCode from 'react-qr-code';
 
@@ -1641,11 +1642,6 @@ const callWhatsAppApi = async (phone: string, message: string, settings: ShopSet
 
 const generatePersonalizedMessage = async (customer: Customer | null | undefined, sale: Sale | null, type: 'invoice' | 'reminder', lang: 'en' | 'bn' | 'ar', settings: ShopSettings) => {
   try {
-    if (!process.env.GEMINI_API_KEY) {
-      console.warn("GEMINI_API_KEY is not defined. Falling back to template.");
-      return null;
-    }
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     let prompt = `You are a helpful and polite shop assistant for "${settings.name || 'our shop'}". 
 Generate a personalized WhatsApp message for a customer.
 Type of message: ${type === 'invoice' ? 'New Invoice/Purchase Confirmation' : 'Due Payment Reminder'}
@@ -1666,13 +1662,20 @@ Paid Amount: ${settings.currencySymbol} ${sale.paidAmount}`;
     prompt += `\nInclude proper greetings, be friendly, and sign off with the shop's name. Use clear formatting and appropriate emojis. 
 Do NOT include any markdown blocks, JSON format, or preamble like "Here is the message". Return ONLY the actual WhatsApp message text.`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-flash-latest",
-      contents: prompt,
+    const responseFetch = await fetch('/api/gemini/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: prompt,
+        config: { model: "gemini-1.5-flash-latest" }
+      })
     });
 
-    if (response && response.text) {
-      return response.text.trim();
+    if (!responseFetch.ok) throw new Error("API failed");
+    const data = await responseFetch.json();
+
+    if (data && data.text) {
+      return data.text.trim();
     }
     return null;
   } catch (error) {
@@ -1929,9 +1932,7 @@ async function parseNewProductVoiceCommand(rawText: string, categories: string[]
   category?: string,
   unit?: string
 } | null> {
-  if (!process.env.GEMINI_API_KEY) return null;
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const prompt = `
       Extract product details from this voice command: "${rawText}"
       Available categories: ${categories.join(', ')}
@@ -1940,16 +1941,25 @@ async function parseNewProductVoiceCommand(rawText: string, categories: string[]
       Return JSON: { "name": "...", "price": 10, "stock": 100, "category": "...", "unit": "kg/pcs" }
     `;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-flash-latest",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-      }
+    const responseFetch = await fetch('/api/gemini/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: prompt,
+        config: { 
+          model: "gemini-1.5-flash-latest",
+          generationConfig: {
+            responseMimeType: "application/json",
+          }
+        }
+      })
     });
 
-    if (response && response.text) {
-      const text = response.text;
+    if (!responseFetch.ok) throw new Error("API failed");
+    const data = await responseFetch.json();
+
+    if (data && data.text) {
+      const text = data.text;
       const jsonStr = text.replace(/```json|```/g, '').trim();
       return JSON.parse(jsonStr);
     }
@@ -3156,6 +3166,7 @@ export default function App() {
   const [lastSale, setLastSale] = useState<Sale | null>(null);
   const [editingSale, setEditingSale] = useState<Sale | null>(null);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [scannerMode, setScannerMode] = useState<'cart' | 'product'>('cart');
   const [notification, setNotification] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
@@ -3168,20 +3179,19 @@ export default function App() {
   const generateCustomerSuggestion = async (query: string) => {
     if (!query || query.length < 2) return;
     try {
-      if (!process.env.GEMINI_API_KEY) {
-        setCustomerSuggestion(`I couldn't find "${query}" in our database. Shall we add them as a new customer?`);
-        setIsCustomerModalOpen(true);
-        return;
-      }
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const prompt = `The user searched for a customer named "${query}" but they don't exist in the database. Write a very short (max 15 words) friendly and helpful AI assistant message suggesting to add them as a new customer. Be professional but welcoming. Example: "I couldn't find ${query}. Would you like me to help you add them to your records?"`;
       
-      const response = await ai.models.generateContent({
-        model: "gemini-flash-latest",
-        contents: prompt
+      const responseFetch = await fetch('/api/gemini/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: prompt,
+          config: { model: "gemini-1.5-flash-latest" }
+        })
       });
       
-      setCustomerSuggestion(response.text || `I couldn't find "${query}". Would you like to add them?`);
+      const data = await responseFetch.json();
+      setCustomerSuggestion(data.text || `I couldn't find "${query}". Would you like to add them?`);
     } catch (error) {
       setCustomerSuggestion(`I couldn't find "${query}" in our database. Shall we add them as a new customer?`);
     }
@@ -4705,15 +4715,21 @@ export default function App() {
   };
 
   const handleScan = (barcode: string) => {
-    const product = products.find(p => p.barcode === barcode);
-    if (product) {
-      addToCart(product);
+    if (scannerMode === 'cart') {
+      const product = products.find(p => p.barcode === barcode);
+      if (product) {
+        addToCart(product);
+        setIsScannerOpen(false);
+        setNotification({ message: `Added ${product.name} to cart`, type: 'success' });
+      } else {
+        setNotification({ message: `Product with barcode ${barcode} not found. Redirecting to Inventory...`, type: 'info' });
+        setIsScannerOpen(false);
+        setTimeout(() => setActiveTab('inventory'), 1500);
+      }
+    } else if (scannerMode === 'product') {
+      setEditingProduct(prev => ({ ...(prev || {}), barcode }));
       setIsScannerOpen(false);
-      setNotification({ message: `Added ${product.name} to cart`, type: 'success' });
-    } else {
-      setNotification({ message: `Product with barcode ${barcode} not found. Redirecting to Inventory...`, type: 'info' });
-      setIsScannerOpen(false);
-      setTimeout(() => setActiveTab('inventory'), 1500);
+      setNotification({ message: `Barcode ${barcode} scanned`, type: 'success' });
     }
   };
 
@@ -5495,6 +5511,8 @@ export default function App() {
                 settings={dynamicSettings}
                 isSaving={isSavingProduct}
                 setIsSaving={setIsSavingProduct}
+                setScannerMode={setScannerMode}
+                setIsScannerOpen={setIsScannerOpen}
                 user={user}
               />
             )}
@@ -5551,7 +5569,7 @@ export default function App() {
               />
             )}
             {activeTab === 'barcode' && (
-              <BarcodePage products={products} settings={dynamicSettings} />
+              <BarcodePage products={products} settings={dynamicSettings} user={user} setNotification={setNotification} />
             )}
             {activeTab === 'note' && (
               <NoteView 
@@ -7910,12 +7928,19 @@ function CourierView() {
   );
 }
 
-function BarcodePage({ products, settings }: { products: Product[], settings: ShopSettings }) {
+function BarcodePage({ products, settings, user, setNotification }: { products: Product[], settings: ShopSettings, user?: any, setNotification: any }) {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [activeView, setActiveView] = useState<'generate' | 'history' | 'qr'>('generate');
   const [warning, setWarning] = useState<string | null>(null);
   const [generatedValue, setGeneratedValue] = useState<string>('');
   const [qrInput, setQrInput] = useState<string>('');
+  
+  // New States for Merchant QR
+  const [qrMode, setQrMode] = useState<'merchant' | 'custom'>('merchant');
+  const [domainUrl, setDomainUrl] = useState('https://pos.sellerscampus.com');
+  const [pathPrefix, setPathPrefix] = useState('merchant');
+  
+  const shopCode = settings.shopCode || user?.shopId || 'unknown';
   const theme = PAGE_THEMES.barcode;
 
   const systemLang = settings.systemLanguage || 'bn';
@@ -8042,6 +8067,228 @@ function BarcodePage({ products, settings }: { products: Product[], settings: Sh
         </head>
         <body onload="checkDepsAndRun()">
           ${contents}
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
+  const handlePrintMerchantQR = () => {
+    const finalUrl = `${domainUrl}/${pathPrefix}/${shopCode}`;
+    const printWindow = window.open('', '_blank', 'width=800,height=900');
+    if (!printWindow) return;
+
+    printWindow.document.write(`
+      <html lang="bn">
+        <head>
+          <title>${settings.name || 'Shop'} - QR Standee</title>
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=Hind+Siliguri:wght@400;700&display=swap');
+            @media print {
+              @page { size: A5 portrait; margin: 0; }
+              body { margin: 0; padding: 0; background: #fff; -webkit-print-color-adjust: exact; }
+              .no-print { display: none; }
+            }
+            body { 
+              font-family: 'Inter', 'Hind Siliguri', sans-serif; 
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+              min-height: 100vh;
+              margin: 0;
+              background-color: #f8fafc;
+              padding: 24px;
+              box-sizing: border-box;
+            }
+            .standee-card {
+              width: 140mm;
+              height: 200mm;
+              background: linear-gradient(135deg, #6366f1 0%, #312e81 100%);
+              border-radius: 32px;
+              color: white;
+              padding: 32px;
+              box-sizing: border-box;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: space-between;
+              box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+              text-align: center;
+              position: relative;
+              overflow: hidden;
+              border: 1px solid rgba(255,255,255,0.1);
+            }
+            .standee-card::before {
+              content: '';
+              position: absolute;
+              top: -100px;
+              left: -100px;
+              width: 300px;
+              height: 300px;
+              background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 70%);
+              border-radius: 50%;
+            }
+            .shop-logo {
+              width: 64px;
+              height: 64px;
+              background: white;
+              color: #4f46e5;
+              border-radius: 20px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-weight: 900;
+              font-size: 28px;
+              margin-bottom: 8px;
+              box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            }
+            .shop-name {
+              font-size: 26px;
+              font-weight: 900;
+              margin: 4px 0;
+              letter-spacing: -0.025em;
+              color: #ffffff;
+              text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            .instructions {
+              background: rgba(255, 255, 255, 0.1);
+              border: 1px solid rgba(255, 255, 255, 0.2);
+              border-radius: 16px;
+              padding: 12px 24px;
+              font-size: 14px;
+              font-weight: 905;
+              letter-spacing: 0.1em;
+              text-transform: uppercase;
+              color: #ffffff;
+              margin: 12px 0;
+              width: 90%;
+              box-shadow: inset 0 2px 4px rgba(255,255,255,0.1);
+            }
+            .qr-container {
+              background: white;
+              border-radius: 28px;
+              padding: 24px;
+              box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2);
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              margin: 16px 0;
+              border: 1px solid rgba(0,0,0,0.05);
+            }
+            .qr-container canvas {
+              width: 190px;
+              height: 190px;
+            }
+            .shop-code-badge {
+              margin-top: 16px;
+              background: #1e1b4b;
+              color: #ffffff;
+              font-weight: 900;
+              font-family: monospace;
+              padding: 8px 20px;
+              border-radius: 99px;
+              font-size: 16px;
+              letter-spacing: 0.1em;
+              box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+            }
+            .scan-text {
+              font-size: 16px;
+              font-weight: 700;
+              color: #e0e7ff;
+              margin-top: 4px;
+            }
+            .link-text {
+              font-size: 11px;
+              font-family: monospace;
+              color: #c7d2fe;
+              background: rgba(0, 0, 0, 0.2);
+              padding: 6px 12px;
+              border-radius: 8px;
+              max-width: 100%;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              white-space: nowrap;
+              border: 1px solid rgba(255,255,255,0.05);
+            }
+            .footer {
+              font-size: 10px;
+              font-weight: 900;
+              letter-spacing: 0.15em;
+              text-transform: uppercase;
+              color: #818cf8;
+              margin-top: 16px;
+            }
+            .no-print-btn {
+              background: #4f46e5;
+              color: white;
+              border: none;
+              padding: 14px 28px;
+              font-size: 14px;
+              font-weight: 900;
+              border-radius: 16px;
+              cursor: pointer;
+              margin-bottom: 20px;
+              transition: all 0.2s;
+              box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.3);
+            }
+            .no-print-btn:hover {
+              background: #4338ca;
+              transform: translateY(-1px);
+            }
+          </style>
+          <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+        </head>
+        <body>
+          <button class="no-print-btn no-print" onclick="window.print()">Print Standee / পোস্টার প্রিন্ট</button>
+          
+          <div class="standee-card">
+            <div style="display: flex; flex-direction: column; align-items: center; width: 100%;">
+              <div class="shop-logo">
+                ${settings.name ? settings.name.charAt(0).toUpperCase() : 'S'}
+              </div>
+              <div class="shop-name">${settings.name || 'SellersCampus Shop'}</div>
+              <div class="instructions">
+                ${systemLang === 'bn' ? 'দোকান সিলেক্ট করতে স্ক্যান করুন' : 'SCAN TO SELECT SHOP'}
+              </div>
+            </div>
+
+            <div class="qr-container">
+              <canvas id="standee-qr"></canvas>
+              <div class="shop-code-badge">CODE: ${shopCode}</div>
+            </div>
+
+            <div style="display: flex; flex-direction: column; align-items: center; width: 100%;">
+              <p class="scan-text">
+                ${systemLang === 'bn' ? 'স্ক্যান করুন এবং সরাসরি অর্ডার দিন' : 'Scan & Place Your Orders Directly'}
+              </p>
+              <p class="link-text">${finalUrl}</p>
+              <div class="footer">SellersCampus POS Network</div>
+            </div>
+          </div>
+
+          <script>
+            setTimeout(() => {
+              if (typeof QRCode !== 'undefined') {
+                QRCode.toCanvas(document.getElementById('standee-qr'), "${finalUrl}", { 
+                  width: 190, 
+                  height: 190, 
+                  margin: 1,
+                  color: {
+                    dark: "#000000",
+                    light: "#ffffff"
+                  }
+                }, function(error) {
+                  if (error) console.error(error);
+                  else {
+                    setTimeout(() => {
+                      window.print();
+                    }, 500);
+                  }
+                });
+              }
+            }, 100);
+          </script>
         </body>
       </html>
     `);
@@ -8321,22 +8568,94 @@ function BarcodePage({ products, settings }: { products: Product[], settings: Sh
               {activeView === 'qr' && (
                 <div className="p-10 lg:p-16 space-y-12">
                   <div className="max-w-xl mx-auto space-y-12">
-                    <div className="space-y-4">
-                       <div className="flex items-center gap-3 ml-4">
-                        <div className="w-1.5 h-1.5 bg-indigo-600 rounded-full animate-pulse"></div>
-                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Data Encoding Matrix</label>
-                      </div>
-                      <div className="relative group">
-                        <QrCode className="absolute left-6 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5 group-focus-within:text-indigo-500 transition-colors" />
-                        <input
-                          type="text"
-                          value={qrInput}
-                          onChange={(e) => setQrInput(e.target.value)}
-                          placeholder="Inject URL, transaction ID, or plaintext..."
-                          className="w-full pl-16 pr-6 py-6 bg-gray-50 border-none rounded-[2.2rem] text-base font-bold focus:ring-2 focus:ring-indigo-500 shadow-inner outline-none transition-all"
-                        />
-                      </div>
+                    {/* QR Generator Mode Toggles */}
+                    <div className="flex bg-gray-100 p-1.5 rounded-[1.5rem] border border-gray-200">
+                      <button
+                        onClick={() => setQrMode('merchant')}
+                        className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-2xl transition-all ${
+                          qrMode === 'merchant'
+                            ? 'bg-indigo-600 text-white shadow-lg'
+                            : 'text-gray-500 hover:text-gray-900'
+                        }`}
+                      >
+                        {systemLang === 'bn' ? 'দোকান কিউআর লিংক' : 'Merchant QR Code'}
+                      </button>
+                      <button
+                        onClick={() => setQrMode('custom')}
+                        className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-2xl transition-all ${
+                          qrMode === 'custom'
+                            ? 'bg-indigo-600 text-white shadow-lg'
+                            : 'text-gray-500 hover:text-gray-900'
+                        }`}
+                      >
+                        {systemLang === 'bn' ? 'কাস্টম কিউআর' : 'Custom QR Code'}
+                      </button>
                     </div>
+
+                    {qrMode === 'merchant' ? (
+                      <div className="space-y-6">
+                        <div className="bg-indigo-50/40 p-6 rounded-3xl border border-indigo-100/30 text-xs text-indigo-900 font-bold leading-relaxed space-y-2">
+                          <p className="flex items-center gap-2">
+                            <Sparkles className="w-4 h-4 text-indigo-500 animate-pulse shrink-0" />
+                            <span>{systemLang === 'bn' ? 'কাস্টমাররা কিউআর কোড স্ক্যান করে সরাসরি আপনার দোকানে যুক্ত হতে পারবে।' : 'Customers can scan this QR code to quickly open and select your shop storefront.'}</span>
+                          </p>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] ml-2">{systemLang === 'bn' ? 'ডোমেইন' : 'Domain'}</label>
+                            <input
+                              type="text"
+                              value={domainUrl}
+                              onChange={(e) => setDomainUrl(e.target.value)}
+                              placeholder="https://pos.sellerscampus.com"
+                              className="w-full px-5 py-4 bg-gray-50 border-none rounded-2xl text-xs font-bold focus:ring-2 focus:ring-indigo-500 outline-none"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] ml-2">{systemLang === 'bn' ? 'পাথ প্রিফিক্স' : 'Path Prefix'}</label>
+                            <input
+                              type="text"
+                              value={pathPrefix}
+                              onChange={(e) => setPathPrefix(e.target.value)}
+                              placeholder="merchant"
+                              className="w-full px-5 py-4 bg-gray-50 border-none rounded-2xl text-xs font-bold focus:ring-2 focus:ring-indigo-500 outline-none font-mono"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="p-4 bg-gray-50 rounded-2xl flex items-center justify-between border border-gray-100">
+                          <div>
+                            <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">{systemLang === 'bn' ? 'ইউনিক দোকান কোড' : 'Unique Shop ID'}</p>
+                            <p className="text-sm font-black text-indigo-600 font-mono tracking-wider mt-1">{shopCode}</p>
+                          </div>
+                          <span className="text-[9px] font-black uppercase text-emerald-600 bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-lg">{systemLang === 'bn' ? 'সিস্টেম জেনারেটেড' : 'Auto Generated'}</span>
+                        </div>
+
+                        <div className="bg-indigo-900 text-indigo-100 p-5 rounded-3xl space-y-2">
+                          <p className="text-[9px] font-black text-indigo-300 uppercase tracking-widest">{systemLang === 'bn' ? 'কাস্টমারদের জন্য নির্ধারিত ডোমেন লিংক' : 'Final Selection Link'}</p>
+                          <p className="font-mono text-xs font-bold leading-tight break-all max-w-full select-all selection:bg-indigo-500 bg-black/20 p-2.5 rounded-xl border border-white/5">{domainUrl}/{pathPrefix}/{shopCode}</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-3 ml-4">
+                          <div className="w-1.5 h-1.5 bg-indigo-600 rounded-full animate-pulse"></div>
+                          <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">{systemLang === 'bn' ? 'ডাটা এনকোডিং ম্যাট্রিক্স (যেকোনো লিংক/লেখা)' : 'Data Encoding Matrix'}</label>
+                        </div>
+                        <div className="relative group">
+                          <QrCode className="absolute left-6 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5 group-focus-within:text-indigo-500 transition-colors" />
+                          <input
+                            type="text"
+                            value={qrInput}
+                            onChange={(e) => setQrInput(e.target.value)}
+                            placeholder={systemLang === 'bn' ? 'যেকোনো লিংক বা লেখা টাইপ করুন...' : 'Inject URL, transaction ID, or plaintext...'}
+                            className="w-full pl-16 pr-6 py-6 bg-gray-50 border-none rounded-[2.2rem] text-sm font-bold focus:ring-2 focus:ring-indigo-500 shadow-inner outline-none transition-all"
+                          />
+                        </div>
+                      </div>
+                    )}
                     
                     <motion.div 
                       layout
@@ -8347,10 +8666,9 @@ function BarcodePage({ products, settings }: { products: Product[], settings: Sh
                       <motion.div 
                          initial={{ scale: 0.9, opacity: 0 }}
                          animate={{ scale: 1, opacity: 1 }}
-                         transition={{ delay: 0.2 }}
                          className="p-8 bg-white rounded-[3rem] shadow-2xl border-[12px] border-gray-50/50 group-hover:scale-105 transition-transform duration-700"
                       >
-                        <QRCode value={qrInput || 'https://intelligence.ops'} size={240} level="H" />
+                        <QRCode value={qrMode === 'merchant' ? `${domainUrl}/${pathPrefix}/${shopCode}` : (qrInput || 'https://sellerscampus.com')} size={220} level="H" />
                       </motion.div>
                       <div className="mt-8 flex items-center gap-3">
                          <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
@@ -8358,16 +8676,47 @@ function BarcodePage({ products, settings }: { products: Product[], settings: Sh
                       </div>
                     </motion.div>
 
-                    <div className="pt-6">
-                      <motion.button 
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                        onClick={() => handlePrint(qrInput, 'qr')} 
-                        className="w-full py-6 bg-gray-900 hover:bg-black text-white rounded-[2.2rem] font-black text-[13px] uppercase tracking-[0.3em] shadow-2xl shadow-black/10 transition-all flex items-center justify-center gap-4"
-                      >
-                        <Printer className="w-5 h-5" />
-                        Execute QR Output
-                      </motion.button>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {qrMode === 'merchant' ? (
+                        <>
+                          <motion.button 
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() => {
+                              const targetUrl = `${domainUrl}/${pathPrefix}/${shopCode}`;
+                              navigator.clipboard.writeText(targetUrl);
+                              setNotification({
+                                type: 'success',
+                                message: systemLang === 'bn' ? 'লিংক ক্লিপবোর্ডে কপি করা হয়েছে!' : 'Selection URL copied to clipboard!'
+                              });
+                            }}
+                            className="w-full py-5 bg-white hover:bg-gray-50 border border-gray-200 text-gray-800 rounded-3xl font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-3 shadow-md"
+                          >
+                            <Copy className="w-4 h-4 text-indigo-500" />
+                            {systemLang === 'bn' ? 'লিংক কপি করুন' : 'Copy Shop URL'}
+                          </motion.button>
+
+                          <motion.button 
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={handlePrintMerchantQR} 
+                            className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-3xl font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-3 shadow-xl shadow-indigo-150"
+                          >
+                            <Printer className="w-4 h-4" />
+                            {systemLang === 'bn' ? 'স্ট্যান্ডি / পোস্টার প্রিন্ট' : 'Print Counter Standee'}
+                          </motion.button>
+                        </>
+                      ) : (
+                        <motion.button 
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.98 }}
+                          onClick={() => handlePrint(qrInput || 'https://sellerscampus.com', 'qr')} 
+                          className="w-full py-5 bg-gray-900 hover:bg-black text-white rounded-3xl font-black text-xs uppercase tracking-widest sm:col-span-2 transition-all flex items-center justify-center gap-3 shadow-xl"
+                        >
+                          <Printer className="w-4 h-4" />
+                          {systemLang === 'bn' ? 'কাস্টম কিউআর কোড প্রিন্ট' : 'Execute QR Output'}
+                        </motion.button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -9844,7 +10193,7 @@ function POS({
   );
 }
 
-function Inventory({ products, categories, stockRecords, sales, onViewHistory, setNotification, isOnline, settings, isSaving, setIsSaving, user }: { 
+function Inventory(props: { 
   products: Product[], 
   categories: Category[], 
   stockRecords: StockRecord[],
@@ -9855,8 +10204,11 @@ function Inventory({ products, categories, stockRecords, sales, onViewHistory, s
   settings: ShopSettings,
   isSaving: boolean,
   setIsSaving: (v: boolean) => void,
+  setScannerMode: (mode: 'cart' | 'product') => void,
+  setIsScannerOpen: (v: boolean) => void,
   user: any
 }) {
+  const { products, categories, stockRecords, sales, onViewHistory, setNotification, isOnline, settings, isSaving, setIsSaving, setScannerMode, setIsScannerOpen, user } = props;
   const systemLang = settings.systemLanguage || 'bn';
   const st = (key: keyof typeof SYSTEM_TRANSLATIONS['en']) => (SYSTEM_TRANSLATIONS[systemLang] as any)[key] || (SYSTEM_TRANSLATIONS['en'] as any)[key];
   const [productSortBy, setProductSortBy] = useState<string>('serial');
@@ -9885,6 +10237,7 @@ function Inventory({ products, categories, stockRecords, sales, onViewHistory, s
   const [categorySearch, setCategorySearch] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
   const [isBulkStockModalOpen, setIsBulkStockModalOpen] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   const [isAiThinking, setIsAiThinking] = useState(false);
@@ -10007,30 +10360,28 @@ function Inventory({ products, categories, stockRecords, sales, onViewHistory, s
 
     try {
       setIsAiThinking(true);
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const response = await ai.models.generateContent({
-        model: "gemini-flash-latest",
-        contents: `Product Name: "${productName}"
+      const responseFetch = await fetch('/api/gemini/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: `Product Name: "${productName}"
 List of available categories: ${FIXED_CATEGORIES.join(', ')}
 
 Task: Identify the most suitable category from the list above for this product name. The name might be in Bengali or English. 
 Return the result as JSON with a "category" field containing exactly one string from the list provided.`,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              category: {
-                type: Type.STRING,
-                description: "The suggested category from the list"
-              }
-            },
-            required: ["category"]
+          config: {
+            model: "gemini-1.5-flash-latest",
+            generationConfig: {
+              responseMimeType: "application/json",
+            }
           }
-        }
+        })
       });
 
-      const result = JSON.parse(response.text || '{}');
+      if (!responseFetch.ok) throw new Error("API failed");
+      const data = await responseFetch.json();
+
+      const result = JSON.parse(data.text || '{}');
       if (result.category && FIXED_CATEGORIES.includes(result.category)) {
         setAiSuggestion(result.category);
       } else {
@@ -10569,6 +10920,37 @@ Return the result as JSON with a "category" field containing exactly one string 
     }
   };
 
+  const handleBulkDelete = async () => {
+    try {
+      setIsSaving(true);
+      const selectedProducts = products.filter(p => selectedProductIds.includes(p.id));
+      
+      for (const product of selectedProducts) {
+        await moveToRecycleBin('product', product.id, product, product.shopId || user?.shopId);
+        await deleteDoc(doc(db, 'products', product.id));
+      }
+      
+      setNotification({ 
+        message: systemLang === 'bn' 
+          ? `সফলভাবে ${selectedProducts.length}টি প্রোডাক্ট রিসাইকেল বিনে পাঠানো হয়েছে।` 
+          : `Successfully moved ${selectedProducts.length} products to Recycle Bin.`, 
+        type: 'success' 
+      });
+      setSelectedProductIds([]);
+      setBulkDeleteConfirmOpen(false);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'products');
+      setNotification({ 
+        message: systemLang === 'bn' 
+          ? `প্রোডাক্ট ডিলিট করতে সমস্যা হয়েছে।` 
+          : `Failed to delete products.`, 
+        type: 'error' 
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const theme = PAGE_THEMES.inventory;
 
   return (
@@ -10687,6 +11069,49 @@ Return the result as JSON with a "category" field containing exactly one string 
         </div>
       </motion.header>
 
+      <AnimatePresence>
+        {selectedProductIds.length > 0 && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.98 }}
+            className="bg-amber-50/80 border border-amber-200/60 rounded-[2rem] p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-lg shadow-amber-50/50 backdrop-blur-sm relative overflow-hidden"
+          >
+            <div className="absolute top-0 left-0 w-1.5 h-full bg-gradient-to-b from-amber-400 to-amber-600"></div>
+            <div className="flex items-center gap-4 pl-2">
+              <div className="w-12 h-12 bg-amber-100 rounded-2xl flex items-center justify-center text-amber-700 shadow-inner">
+                <CheckSquare className="w-6 h-6" />
+              </div>
+              <div>
+                <h4 className="text-sm font-extrabold text-gray-900 uppercase tracking-tight">
+                  {systemLang === 'bn' ? `${selectedProductIds.length}টি প্রোডাক্ট সিলেক্ট করা হয়েছে` : `${selectedProductIds.length} Products Selected`}
+                </h4>
+                <p className="text-xs font-bold text-amber-600/80 mt-0.5">
+                  {systemLang === 'bn' ? 'স্টক পরিবর্তন বা ডিলিট করার জন্য পাশের অপশনগুলো ব্যবহার করুন' : 'Apply bulk adjustments or remove all selected inventory'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 pr-2">
+              <button 
+                onClick={() => setIsBulkStockModalOpen(true)}
+                className="px-5 py-3.5 bg-white text-emerald-700 font-extrabold text-xs uppercase tracking-widest rounded-xl border border-emerald-100 shadow-sm hover:bg-emerald-50 transition-all flex items-center gap-2"
+              >
+                <TrendingUp className="w-4 h-4" />
+                {systemLang === 'bn' ? 'স্টক আপডেট করুন' : 'Bulk Stock In'}
+              </button>
+              
+              <button 
+                onClick={() => setBulkDeleteConfirmOpen(true)}
+                className="px-5 py-3.5 bg-red-600 text-white font-black text-xs uppercase tracking-widest rounded-xl shadow-lg shadow-red-200 hover:bg-red-700 transition-all flex items-center gap-2"
+              >
+                <Trash2 className="w-4 h-4" />
+                {systemLang === 'bn' ? 'ডিলিট করুন' : 'Delete Selected'}
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div className="md:col-span-3 space-y-6">
           <motion.div 
@@ -10738,6 +11163,14 @@ Return the result as JSON with a "category" field containing exactly one string 
               <table className="w-full text-left border-collapse min-w-[800px]">
                 <thead>
                   <tr className="bg-gray-50/50">
+                    <th className="p-6 border-b border-gray-100 text-center w-12 col-span-1">
+                      <input 
+                        type="checkbox" 
+                        checked={selectedProductIds.length === sortedProducts.length && sortedProducts.length > 0} 
+                        onChange={toggleSelectAll} 
+                        className="rounded border-gray-300 text-amber-600 focus:ring-amber-550 w-4.5 h-4.5 cursor-pointer accent-amber-500"
+                      />
+                    </th>
                     <th className="p-6 text-[11px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-100 text-center w-20">SL</th>
                     <th className="p-6 text-[11px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-100">Product Particulars</th>
                     <th className="p-6 text-[11px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-100">Catalog</th>
@@ -10758,6 +11191,17 @@ Return the result as JSON with a "category" field containing exactly one string 
                         whileHover={{ backgroundColor: "rgba(255, 251, 235, 0.5)" }}
                         className="group relative"
                       >
+                        <td className="p-6 text-center">
+                          <input 
+                            type="checkbox" 
+                            checked={selectedProductIds.includes(p.id)} 
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              toggleSelectProduct(p.id);
+                            }} 
+                            className="rounded border-gray-300 text-amber-600 focus:ring-amber-500 w-4 h-4 cursor-pointer accent-amber-500"
+                          />
+                        </td>
                         <td className="p-6 text-center">
                           <div className="flex flex-col items-center gap-1">
                             <span className="text-[10px] font-black text-gray-300 uppercase tracking-tighter">Pos</span>
@@ -11143,175 +11587,98 @@ Return the result as JSON with a "category" field containing exactly one string 
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <form onSubmit={handleSave} className="p-8 space-y-6 max-h-[80vh] overflow-y-auto">
-                <div className="flex items-center gap-6 p-6 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
-                  <div className="w-24 h-24 bg-white rounded-2xl border border-gray-100 flex items-center justify-center overflow-hidden shadow-sm">
-                    {productImage ? (
-                      <img src={productImage} alt="Product" className="w-full h-full object-cover" />
-                    ) : (
-                      <ImageIcon className="w-8 h-8 text-gray-300" />
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    <label className="block text-sm font-bold text-gray-900 mb-1">Product Image</label>
-                    <p className="text-xs text-gray-500 mb-3">Upload a clear picture of the product</p>
-                    <div className="flex items-center gap-3">
-                      <input 
-                        type="file" 
-                        accept="image/*" 
-                        onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          if (file) {
-                            const base64 = await fileToBase64(file);
-                            setProductImage(base64);
-                          }
-                        }}
-                        className="text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer flex-1"
-                      />
-                      {productImage && (
-                        <button 
-                          type="button"
-                          onClick={() => setProductImage(null)}
-                          className="p-2 text-red-500 hover:bg-red-50 rounded-full transition-colors"
-                          title="Remove Image"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-6">
-                  <div className="col-span-2">
-                    <label className="block text-sm font-bold text-gray-700 mb-2">Product Name *</label>
-                    <input 
-                      name="name" 
-                      value={editingProduct?.name || ''} 
-                      onChange={(e) => setEditingProduct(prev => ({ ...(prev || {}), name: e.target.value }))}
-                      required 
-                      className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" 
-                      placeholder="Enter product name" 
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-2">Unit *</label>
-                    <select name="unit" defaultValue={editingProduct?.unit || 'unit'} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none">
-                      <option value="unit">Unit (pcs)</option>
-                      <option value="kg">KG</option>
-                      <option value="dozen">Dozen</option>
-                      <option value="hali">Hali</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-2">Selling Price *</label>
-                    <input name="price" type="number" step="0.01" defaultValue={editingProduct?.price || 0} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="0.00" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-2">Buying Price (Cost)</label>
-                    <input name="cost" type="number" step="0.01" defaultValue={editingProduct?.cost || 0} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="0.00" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-2">Initial Stock</label>
-                    <input name="stock" type="number" defaultValue={editingProduct?.stock || 0} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="0" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-2">Barcode</label>
-                    <input name="barcode" defaultValue={editingProduct?.barcode || ''} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Scan or enter barcode" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-2">Expiry Date</label>
-                    <input name="expiryDate" type="text" defaultValue={editingProduct?.expiryDate || ''} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="e.g. 10/03/2026" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-2">Location (Shelf/Aisle)</label>
-                    <input name="location" defaultValue={editingProduct?.location || ''} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="e.g. Shelf A1" />
-                  </div>
-                  <div className="col-span-2">
-                    <label className="block text-sm font-bold text-gray-700 mb-2">Company/Brand Name</label>
-                    <input name="company" defaultValue={editingProduct?.company || ''} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="e.g. Unilever, Nestle" />
-                  </div>
+              <form onSubmit={handleSave} className="flex flex-col max-h-[90vh]">
+                <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-grow custom-scrollbar">
+                  {/* Section 1: Basic Info */}
+                  <div className="section-title text-blue-700 font-extrabold border-b pb-2 mb-4">Primary Details</div>
                   
-                  <div className="col-span-2 pt-4 border-t border-gray-100">
-                    <label className="block text-sm font-bold text-indigo-700 mb-2 flex items-center justify-between bg-indigo-50 p-2 rounded-lg">
-                      <span className="flex items-center gap-2">
-                        <Plus className="w-4 h-4" />
-                        Category Selection *
-                      </span>
-                      {isAiThinking && (
-                        <span className="flex items-center gap-1 text-[10px] text-indigo-500 animate-pulse">
-                          <Sparkles className="w-3 h-3" />
-                          AI Thinking...
-                        </span>
-                      )}
-                    </label>
-                    <div className="space-y-3">
-                      {aiSuggestion && (
-                        <motion.button
-                          initial={{ opacity: 0, scale: 0.95 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          type="button"
-                          onClick={() => {
-                            setEditingProduct(prev => ({ ...(prev || {}), category: aiSuggestion }));
-                            setAiSuggestion(null);
-                          }}
-                          className="w-full p-4 bg-indigo-600 border border-indigo-700 rounded-2xl flex items-center justify-between group hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
-                        >
-                          <div className="flex items-center gap-3">
-                            <div className="p-2 bg-white/20 rounded-xl">
-                              <Sparkles className="w-5 h-5 text-white fill-white" />
-                            </div>
-                            <div className="text-left">
-                              <p className="text-[10px] text-indigo-100 font-bold uppercase tracking-wider">AI Suggested Category</p>
-                              <p className="text-lg font-bold text-white">{aiSuggestion}</p>
-                            </div>
-                          </div>
-                          <div className="bg-white/20 p-2 rounded-full">
-                            <Check className="w-5 h-5 text-white" />
-                          </div>
-                        </motion.button>
-                      )}
-                      <div className="relative">
-                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
-                        <input 
-                          type="text" 
-                          placeholder="Search category to filter list..." 
-                          value={categorySearch || ''}
-                          onChange={(e) => setCategorySearch(e.target.value)}
-                          className="w-full pl-12 pr-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none bg-gray-50"
-                        />
+                  <div className="form-group">
+                      <label htmlFor="product-name" className="block text-sm font-semibold text-gray-700 mb-1.5">Product Name <span className="text-red-600">*</span></label>
+                      <input type="text" id="product-name" name="name" defaultValue={editingProduct?.name || ''} className="w-full p-4 border border-gray-300 rounded-xl text-base" placeholder="Enter product name" required/>
+                  </div>
+
+                  <div className="form-group grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                          <label htmlFor="category" className="block text-sm font-semibold text-gray-700 mb-1.5">Category</label>
+                          <select id="category" name="category" defaultValue={editingProduct?.category || ''} className="w-full p-4 border border-gray-300 rounded-xl text-base">
+                              <option value="">-- Select --</option>
+                              {categories.map(cat => <option key={cat.id} value={cat.name}>{cat.name}</option>)}
+                          </select>
                       </div>
-                      <select 
-                        name="category" 
-                        value={editingProduct?.category || ''} 
-                        onChange={(e) => setEditingProduct(prev => ({ ...(prev || {}), category: e.target.value }))}
-                        onFocus={() => {
-                          if (editingProduct?.name && !editingProduct?.category && !aiSuggestion && !isAiThinking) {
-                            getAiCategorySuggestion(editingProduct.name);
-                          }
-                        }}
-                        required 
-                        className="w-full px-4 py-4 rounded-xl border-2 border-gray-100 focus:border-indigo-500 focus:ring-0 outline-none font-semibold text-gray-700"
-                      >
-                        <option value="">Select Category</option>
-                        {categories
-                          .filter(c => c.name.toLowerCase().includes((categorySearch || '').toLowerCase()))
-                          .map(cat => (
-                          <option key={cat.id} value={cat.name}>{cat.name}</option>
-                        ))}
-                      </select>
-                    </div>
+                      <div>
+                          <label htmlFor="company-name" className="block text-sm font-semibold text-gray-700 mb-1.5">Company Name</label>
+                          <input type="text" id="company-name" name="company" defaultValue={editingProduct?.company || ''} className="w-full p-4 border border-gray-300 rounded-xl text-base" placeholder="Brand / Mfg"/>
+                      </div>
+                  </div>
+
+                  {/* Section 2: Pricing & Stock */}
+                  <div className="section-title text-blue-700 font-extrabold border-b pb-2 mb-4 mt-8 text-lg">Pricing & Inventory</div>
+
+                  <div className="form-group grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                          <label htmlFor="selling-price" className="block text-sm font-semibold text-gray-700 mb-1.5">Selling Price <span className="text-red-600">*</span></label>
+                          <input type="number" id="selling-price" name="price" defaultValue={editingProduct?.price || 0} step="0.01" className="w-full p-4 border border-gray-300 rounded-xl text-base" placeholder="0.00" required/>
+                      </div>
+                      <div>
+                          <label htmlFor="buying-cost" className="block text-sm font-semibold text-gray-700 mb-1.5">Buying Cost</label>
+                          <input type="number" id="buying-cost" name="cost" defaultValue={editingProduct?.cost || 0} step="0.01" className="w-full p-4 border border-gray-300 rounded-xl text-base" placeholder="0.00"/>
+                      </div>
+                  </div>
+
+                  <div className="form-group grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+                      <div>
+                          <label htmlFor="initial-stock" className="block text-sm font-semibold text-gray-700 mb-1.5">Initial Stock</label>
+                          <input type="number" id="initial-stock" name="stock" defaultValue={editingProduct?.stock || 0} className="w-full p-4 border border-gray-300 rounded-xl text-base" placeholder="0"/>
+                      </div>
+                      <div>
+                          <label htmlFor="units" className="block text-sm font-semibold text-gray-700 mb-1.5">Units</label>
+                          <select id="units" name="unit" defaultValue={editingProduct?.unit || 'unit'} className="w-full p-4 border border-gray-300 rounded-xl text-base">
+                              <option value="unit">Pcs</option>
+                              <option value="kg">Kg</option>
+                              <option value="dozen">Dozen</option>
+                          </select>
+                      </div>
+                  </div>
+
+                  {/* Section 3: Logistics & Tracking */}
+                  <div className="section-title text-blue-700 font-extrabold border-b pb-2 mb-4 mt-8 text-lg">Logistics & Tracking</div>
+
+                  <div className="form-group">
+                      <label htmlFor="barcode" className="block text-sm font-semibold text-gray-700 mb-1.5">Barcode</label>
+                      <div className="flex gap-3">
+                          <input type="text" id="barcode" name="barcode" defaultValue={editingProduct?.barcode || ''} className="w-full p-4 border border-gray-300 rounded-xl text-base flex-grow" placeholder="Scan or enter barcode"/>
+                          <button type="button" onClick={() => { setScannerMode('product'); setIsScannerOpen(true); }} className="bg-blue-700 text-white rounded-xl px-5 flex items-center gap-2 font-bold text-sm shadow-md hover:bg-blue-800">
+                              <span>📷</span> Scan
+                          </button>
+                      </div>
+                  </div>
+
+                  <div className="form-group grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                          <label htmlFor="expiry-date" className="block text-sm font-semibold text-gray-700 mb-1.5">Expiry Date</label>
+                          <input type="date" id="expiry-date" name="expiryDate" defaultValue={editingProduct?.expiryDate || ''} className="w-full p-4 border border-gray-300 rounded-xl text-base"/>
+                      </div>
+                      <div>
+                          <label htmlFor="location" className="block text-sm font-semibold text-gray-700 mb-1.5">Location (Shelf)</label>
+                          <input type="text" id="location" name="location" defaultValue={editingProduct?.location || ''} className="w-full p-4 border border-gray-300 rounded-xl text-base" placeholder="e.g. A-12"/>
+                      </div>
+                  </div>
+
+                  <div className="form-group pt-2">
+                      <div className="flex items-center justify-between p-4 border rounded-xl bg-gray-50">
+                          <label htmlFor="warranty" className="text-sm font-semibold text-gray-700">Product Warranty</label>
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" name="warranty" defaultChecked={editingProduct?.hasWarranty || false} id="warranty" className="sr-only peer" />
+                            <div className="w-12 h-7 bg-gray-300 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600"></div>
+                            <span className="ml-3 text-sm font-semibold text-gray-700">Enable</span>
+                          </label>
+                      </div>
                   </div>
                 </div>
-                <div className="flex justify-end gap-4 pt-4">
-                  <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-3 text-gray-600 font-semibold hover:bg-gray-100 rounded-xl transition-colors" disabled={isSaving}>Cancel</button>
-                  <button 
-                    type="submit" 
-                    disabled={isSaving}
-                    className="px-8 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed min-w-[140px]"
-                  >
-                    {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
-                    {isSaving ? 'Saving...' : 'Save Product'}
-                  </button>
+
+                <div className="p-6 border-t border-gray-100 flex flex-col sm:flex-row justify-end gap-4 bg-gray-50/50">
+                    <button type="button" onClick={() => { setIsModalOpen(false); setEditingProduct(null); }} className="px-6 py-4 bg-gray-100 rounded-xl text-gray-700 font-bold hover:bg-gray-200">Cancel</button>
+                    <button type="submit" className="px-6 py-4 bg-blue-700 text-white rounded-xl font-bold hover:bg-blue-800 shadow-lg shadow-blue-200">Save Product</button>
                 </div>
               </form>
             </motion.div>
@@ -11479,6 +11846,56 @@ Return the result as JSON with a "category" field containing exactly one string 
                   className="px-6 py-2 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 disabled:opacity-50"
                 >
                   {isUploading ? 'Updating...' : `Update ${selectedProductIds.length} Products`}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {bulkDeleteConfirmOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="bg-white w-full max-w-md rounded-[2.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.15)] overflow-hidden p-8 text-center space-y-6 border border-gray-100 relative"
+            >
+              <button 
+                onClick={() => setBulkDeleteConfirmOpen(false)} 
+                className="absolute top-6 right-6 p-2 hover:bg-gray-100 rounded-full transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+              
+              <div className="w-16 h-16 bg-red-50 text-red-650 rounded-2xl flex items-center justify-center mx-auto shadow-inner relative">
+                <div className="absolute inset-0 bg-red-500 opacity-5 rounded-2xl blur-sm"></div>
+                <Trash2 className="w-8 h-8 relative z-10" />
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-xl font-extrabold text-gray-900 uppercase tracking-tight">
+                  {systemLang === 'bn' ? 'ডিলিট করতে চান?' : 'Confirm Bulk Deletion'}
+                </h3>
+                <p className="text-sm font-bold text-gray-500 leading-relaxed px-2">
+                  {systemLang === 'bn' 
+                    ? `আপনি কি নিশ্চিত যে সিলেক্ট করা ${selectedProductIds.length}টি প্রোডাক্ট ডিলিট করতে চান? এগুলো রিসাইকেল বিনে পাঠানো হবে।` 
+                    : `Are you sure you want to delete these ${selectedProductIds.length} items? This will move them to the Recycle Bin and clear current inventory.`}
+                </p>
+              </div>
+              <div className="flex gap-4 pt-2">
+                <button 
+                  onClick={() => setBulkDeleteConfirmOpen(false)}
+                  className="flex-1 py-4 bg-gray-50 border border-gray-100 hover:bg-gray-100 text-gray-600 font-extrabold rounded-2xl transition-all uppercase tracking-widest text-[10px]"
+                >
+                  {systemLang === 'bn' ? 'না, বাতিল' : 'Cancel'}
+                </button>
+                <button 
+                  onClick={handleBulkDelete}
+                  className="flex-1 py-4 bg-red-600 hover:bg-red-700 text-white font-extrabold rounded-2xl shadow-xl shadow-red-100 hover:shadow-2xl transition-all uppercase tracking-widest text-[10px] flex items-center justify-center gap-1.5"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  {systemLang === 'bn' ? 'হ্যাঁ, ডিলিট' : 'Yes, Delete'}
                 </button>
               </div>
             </motion.div>
@@ -13382,71 +13799,75 @@ function Customers({
               className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl relative overflow-hidden"
             >
               <div className={`absolute top-0 left-0 w-full h-2 bg-gradient-to-r ${theme.gradient}`}></div>
-              <div className="p-8">
-                <div className="flex items-center justify-between mb-8">
-                  <div>
-                    <h3 className="text-2xl font-black text-gray-900 tracking-tight">
-                      {editingCustomer ? 'Update Profile' : 'New Customer'}
-                    </h3>
-                    <p className="text-xs text-gray-400 font-bold uppercase tracking-widest mt-1">Master Ledger Entry</p>
+              <div className="flex flex-col max-h-[90vh]">
+                <div className="p-6 pb-2 border-b border-gray-100 bg-gray-50/50">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="text-2xl font-black text-gray-900 tracking-tight">
+                        {editingCustomer ? 'Update Profile' : 'New Customer'}
+                      </h3>
+                      <p className="text-xs text-gray-400 font-bold uppercase tracking-widest mt-1">Master Ledger Entry</p>
+                    </div>
+                    <button onClick={() => setIsModalOpen(false)} className={`p-2 bg-purple-50 text-purple-600 rounded-xl hover:bg-purple-100 transition-all`}>
+                      <X className="w-5 h-5" />
+                    </button>
                   </div>
-                  <button onClick={() => setIsModalOpen(false)} className={`p-2 ${theme.bg} text-${theme.primary} rounded-xl hover:bg-purple-100 transition-all`}>
-                    <X className="w-5 h-5" />
-                  </button>
                 </div>
 
-                <form onSubmit={handleSave} className="space-y-6 max-h-[60vh] overflow-y-auto px-1 pr-4 custom-scrollbar">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Full Name</label>
-                       <div className="relative">
-                         <User className="absolute left-4 top-1/2 -translate-y-1/2 text-purple-600 w-5 h-5" />
-                         <input name="name" defaultValue={editingCustomer?.name || ''} required placeholder="Customer Name" className="w-full pl-12 pr-5 py-4 bg-gray-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-purple-500 shadow-inner outline-none" />
-                       </div>
+                <form onSubmit={handleSave} className="flex flex-col overflow-hidden">
+                  <div className="p-6 pt-4 space-y-4 overflow-y-auto custom-scrollbar">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Full Name</label>
+                         <div className="relative">
+                           <User className="absolute left-4 top-1/2 -translate-y-1/2 text-purple-600 w-5 h-5" />
+                           <input name="name" defaultValue={editingCustomer?.name || ''} required placeholder="Customer Name" className="w-full pl-12 pr-5 py-4 bg-gray-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-purple-500 shadow-inner outline-none" />
+                         </div>
+                      </div>
+                      <div className="space-y-2">
+                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Phone Number</label>
+                         <div className="relative">
+                           <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-purple-600 w-5 h-5" />
+                           <input name="phone" defaultValue={editingCustomer?.phone || ''} required placeholder="017XXXXXXXX" className="w-full pl-12 pr-5 py-4 bg-gray-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-purple-500 shadow-inner outline-none" />
+                         </div>
+                      </div>
                     </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Father's Name</label>
+                         <input name="fatherName" defaultValue={editingCustomer?.fatherName || ''} placeholder="Father's Name" className="w-full px-5 py-4 bg-gray-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-purple-500 shadow-inner outline-none" />
+                      </div>
+                      <div className="space-y-2">
+                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">House Name/No</label>
+                         <input name="houseName" defaultValue={editingCustomer?.houseName || ''} placeholder="House/Village" className="w-full px-5 py-4 bg-gray-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-purple-500 shadow-inner outline-none" />
+                      </div>
+                    </div>
+
                     <div className="space-y-2">
-                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Phone Number</label>
-                       <div className="relative">
-                         <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-purple-600 w-5 h-5" />
-                         <input name="phone" defaultValue={editingCustomer?.phone || ''} required placeholder="017XXXXXXXX" className="w-full pl-12 pr-5 py-4 bg-gray-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-purple-500 shadow-inner outline-none" />
-                       </div>
+                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Primary Address</label>
+                      <textarea name="address" defaultValue={editingCustomer?.address || ''} placeholder="Full detailed address..." className="w-full px-5 py-4 bg-gray-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-purple-500 shadow-inner outline-none h-24 resize-none" />
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Initial Balance (TK)</label>
+                         <div className="relative">
+                           <CalculatorIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-rose-600 w-5 h-5" />
+                           <input name="currentDue" type="number" defaultValue={editingCustomer?.currentDue || 0} placeholder="0.00" className="w-full pl-12 pr-5 py-4 bg-gray-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-rose-500 shadow-inner outline-none" />
+                         </div>
+                      </div>
+                      <div className="space-y-2">
+                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Promise Date</label>
+                         <div className="relative">
+                           <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-orange-600 w-5 h-5" />
+                           <input name="dueDate" type="date" defaultValue={editingCustomer?.dueDate || ''} className="w-full pl-12 pr-5 py-4 bg-gray-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-orange-500 shadow-inner outline-none" />
+                         </div>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Father's Name</label>
-                       <input name="fatherName" defaultValue={editingCustomer?.fatherName || ''} placeholder="Father's Name" className="w-full px-5 py-4 bg-gray-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-purple-500 shadow-inner outline-none" />
-                    </div>
-                    <div className="space-y-2">
-                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">House Name/No</label>
-                       <input name="houseName" defaultValue={editingCustomer?.houseName || ''} placeholder="House/Village" className="w-full px-5 py-4 bg-gray-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-purple-500 shadow-inner outline-none" />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Primary Address</label>
-                    <textarea name="address" defaultValue={editingCustomer?.address || ''} placeholder="Full detailed address..." className="w-full px-5 py-4 bg-gray-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-purple-500 shadow-inner outline-none h-24 resize-none" />
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Initial Balance (TK)</label>
-                       <div className="relative">
-                         <CalculatorIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-rose-600 w-5 h-5" />
-                         <input name="currentDue" type="number" defaultValue={editingCustomer?.currentDue || 0} placeholder="0.00" className="w-full pl-12 pr-5 py-4 bg-gray-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-rose-500 shadow-inner outline-none" />
-                       </div>
-                    </div>
-                    <div className="space-y-2">
-                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Promise Date</label>
-                       <div className="relative">
-                         <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-orange-600 w-5 h-5" />
-                         <input name="dueDate" type="date" defaultValue={editingCustomer?.dueDate || ''} className="w-full pl-12 pr-5 py-4 bg-gray-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-orange-500 shadow-inner outline-none" />
-                       </div>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-4 pt-4">
+                  <div className="p-6 border-t border-gray-100 bg-gray-50/50 flex gap-4">
                     <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-4 bg-gray-50 text-gray-400 font-black text-xs uppercase tracking-widest rounded-2xl hover:bg-gray-100 transition-all">Cancel</button>
                     <button type="submit" className={`flex-1 py-4 bg-gradient-to-r ${theme.gradient} text-white font-black text-xs uppercase tracking-widest rounded-2xl shadow-lg shadow-purple-100 hover:shadow-purple-200 transition-all`}>
                       {editingCustomer ? 'Update Entry' : 'Create Customer'}

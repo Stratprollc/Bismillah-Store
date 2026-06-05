@@ -1,12 +1,61 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import { GoogleGenAI } from "@google/genai";
 
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
   
-  const isProd = process.env.NODE_ENV === 'production' && process.env.DISABLE_HMR !== 'true';
+  app.use(express.json());
+
+  // API Routes
+  app.post('/api/gemini/generate', async (req, res) => {
+    try {
+      const { prompt, systemInstruction, tools, config, contents } = req.body;
+      const apiKey = process.env.GEMINI_API_KEY;
+      
+      if (!apiKey) {
+        return res.status(500).json({ error: 'GEMINI_API_KEY is not configured on server' });
+      }
+
+      const ai = new GoogleGenAI({ 
+        apiKey: apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+      
+      const response = await ai.models.generateContent({ 
+        model: config?.model || "gemini-flash-latest",
+        contents: contents || [{ role: 'user', parts: [{ text: prompt }] }],
+        config: {
+          systemInstruction: systemInstruction,
+          tools: tools,
+          ...(config?.generationConfig || {})
+        }
+      });
+
+      res.json({ 
+        text: response.text,
+        functionCalls: response.functionCalls
+      });
+    } catch (error: any) {
+      console.error('Gemini API Error:', error);
+      res.status(500).json({ error: error.message || 'Internal Server Error' });
+    }
+  });
+
+  // Keep old endpoint for compatibility if needed, or redirect it
+  app.post('/api/gemini/voice-parse', async (req, res) => {
+    // Redirect to the new generic one
+    req.url = '/api/gemini/generate';
+    app._router.handle(req, res, () => {});
+  });
+
+  const isProd = process.env.NODE_ENV === 'production';
 
   // For development (AI Studio / Local dev)
   if (!isProd) {

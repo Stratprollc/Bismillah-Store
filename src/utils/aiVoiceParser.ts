@@ -1,25 +1,8 @@
-import { GoogleGenAI, Type } from "@google/genai";
-
-let aiInstance: GoogleGenAI | null = null;
-const getAI = () => {
-  if (!aiInstance) {
-    if (!process.env.GEMINI_API_KEY) {
-      console.warn("GEMINI_API_KEY is missing. Voice AI fallback to standard parsing.");
-      return null;
-    }
-    aiInstance = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  }
-  return aiInstance;
-};
-
 export const parsePosVoiceCommandAI = async (
   rawText: string,
   availableProducts: { id: string, name: string }[],
   availableCustomers: { id: string, name: string, phone: string }[]
 ) => {
-  const ai = getAI();
-  if (!ai) return null;
-
   const productListStr = availableProducts.map(p => `${p.id}:::${p.name}`).join("\n");
   const customerListStr = availableCustomers.map(c => `${c.id}:::${c.name}:::${c.phone}`).join("\n");
 
@@ -45,40 +28,30 @@ Rules:
 `;
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-flash-latest", 
-      contents: prompt,
-      config: {
-        temperature: 0,
-        maxOutputTokens: 2048,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            items: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  action: { type: Type.STRING, enum: ["setCustomer", "addProduct", "newProduct", "unknown"] },
-                  customerId: { type: Type.STRING, nullable: true },
-                  productId: { type: Type.STRING, nullable: true },
-                  quantity: { type: Type.NUMBER },
-                  recognizedName: { type: Type.STRING },
-                  unit: { type: Type.STRING, nullable: true }
-                },
-                required: ["action", "quantity", "recognizedName"]
-              }
-            },
-            summary: { type: Type.STRING }
-          },
-          required: ["items", "summary"]
+    const response = await fetch('/api/gemini/voice-parse', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        prompt,
+        config: {
+          model: "gemini-1.5-flash-latest",
+          generationConfig: {
+            temperature: 0,
+            responseMimeType: "application/json",
+          }
         }
-      }
+      }),
     });
 
-    if (response && response.text) {
-      const cleanText = response.text.trim();
+    if (!response.ok) {
+      throw new Error(`API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (data && data.text) {
+      const cleanText = data.text.trim();
       try {
         return JSON.parse(cleanText);
       } catch (parseError) {
@@ -96,7 +69,7 @@ Rules:
     }
   } catch (error: any) {
     console.error("AI parse voice command failed:", error);
-    if (error?.error?.code === 429 || error?.status === "RESOURCE_EXHAUSTED" || error?.message?.includes("quota")) {
+    if (error?.message?.includes("QUOTA") || error?.message?.includes("429")) {
       throw new Error("QUOTA_EXCEEDED");
     }
   }

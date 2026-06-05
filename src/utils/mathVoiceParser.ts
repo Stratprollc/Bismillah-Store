@@ -1,21 +1,4 @@
-import { GoogleGenAI, Type } from "@google/genai";
-
-let aiInstance: GoogleGenAI | null = null;
-const getAI = () => {
-  if (!aiInstance) {
-    if (!process.env.GEMINI_API_KEY) {
-      console.warn("GEMINI_API_KEY is missing. Voice AI math fallback to standard parsing.");
-      return null;
-    }
-    aiInstance = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  }
-  return aiInstance;
-};
-
 export const parseMathVoiceCommandAI = async (rawText: string): Promise<string | null> => {
-  const ai = getAI();
-  if (!ai) return null;
-
   const prompt = `
 You are a high-speed mathematical expression extractor.
 Input: A voice transcript in Bengali, English, or mixed.
@@ -48,17 +31,30 @@ Transcript: "${rawText}"
 `;
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-flash-latest",
-      contents: prompt,
-      config: {
-        temperature: 0,
-        maxOutputTokens: 64,
-      }
+    const response = await fetch('/api/gemini/voice-parse', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        prompt,
+        config: {
+          model: "gemini-1.5-flash-latest",
+          generationConfig: {
+            temperature: 0,
+            maxOutputTokens: 64,
+          }
+        }
+      }),
     });
 
-    if (response && response.text) {
-      const result = response.text.trim();
+    if (!response.ok) {
+      throw new Error(`API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (data && data.text) {
+      const result = data.text.trim();
       return result === "ERROR" ? null : result;
     }
   } catch (error: any) {

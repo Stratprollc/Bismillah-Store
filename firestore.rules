@@ -6,13 +6,15 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // 3. Helpers
+    // 2. Helpers
     function isSignedIn() {
       return request.auth != null;
     }
 
     function isMasterAdmin() {
-      return isSignedIn() && "email" in request.auth.token && request.auth.token.email.matches("(?i)stratproamz@gmail.com");
+      return isSignedIn() && 
+             request.auth.token.email != null && 
+             request.auth.token.email == "stratproamz@gmail.com";
     }
 
     function isOwnerOrStaff(shopId) {
@@ -23,15 +25,40 @@ service cloud.firestore {
       );
     }
 
-    // Generic Shop Data match
+    // 3. Match Blocks
+    
+    // Generic Shop Data match block (products, sales, customers, categories, etc.)
     match /{collection}/{docId} {
-      allow read: if isMasterAdmin() || (isSignedIn() && resource.data.shopId != null && isOwnerOrStaff(resource.data.shopId));
+      allow read: if isMasterAdmin() || (
+        isSignedIn() && 
+        resource != null && 
+        resource.data.shopId != null && 
+        isOwnerOrStaff(resource.data.shopId)
+      );
       
-      allow create: if isMasterAdmin() || (isSignedIn() && request.resource.data.shopId != null && isOwnerOrStaff(request.resource.data.shopId));
+      allow create: if isMasterAdmin() || (
+        isSignedIn() && 
+        request.resource != null && 
+        request.resource.data.shopId != null && 
+        isOwnerOrStaff(request.resource.data.shopId)
+      );
 
-      allow update: if isMasterAdmin() || (isSignedIn() && resource.data.shopId != null && isOwnerOrStaff(resource.data.shopId) && request.resource.data.shopId == resource.data.shopId);
+      allow update: if isMasterAdmin() || (
+        isSignedIn() && 
+        resource != null && 
+        resource.data.shopId != null && 
+        isOwnerOrStaff(resource.data.shopId) && 
+        request.resource != null && 
+        request.resource.data.shopId == resource.data.shopId
+      );
 
-      allow delete: if isMasterAdmin() || (isSignedIn() && resource.data.shopId != null && isOwnerOrStaff(resource.data.shopId) && collection in ['recycleBin', 'categories', 'products']);
+      allow delete: if isMasterAdmin() || (
+        isSignedIn() && 
+        resource != null && 
+        resource.data.shopId != null && 
+        isOwnerOrStaff(resource.data.shopId) && 
+        collection in ['recycleBin', 'categories', 'products', 'daily_closings', 'sales', 'expenses', 'investments', 'staff_salaries', 'stockRecords', 'branches', 'employees', 'notes', 'customer_logs', 'due_payments', 'customer_orders']
+      );
     }
 
     match /settings/{shopId} {
@@ -51,8 +78,41 @@ service cloud.firestore {
     }
     
     match /users/{userId} {
-      allow read: if isSignedIn() && (request.auth.uid == userId || isMasterAdmin() || isOwnerOrStaff(get(/databases/$(database)/documents/users/$(request.auth.uid)).data.shopId));
-      allow write: if isMasterAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow read: if isMasterAdmin() || (isSignedIn() && (
+        request.auth.uid == userId || 
+        (resource != null && (
+          resource.data.shopId == request.auth.uid || 
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.shopId == resource.data.shopId)
+        ))
+      ));
+      
+      allow create: if isMasterAdmin() || (isSignedIn() && (
+        request.auth.uid == userId ||
+        (request.resource != null && request.resource.data.shopId != null && (
+          request.auth.uid == request.resource.data.shopId ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.shopId == request.resource.data.shopId)
+        ))
+      ));
+
+      allow update: if isMasterAdmin() || (isSignedIn() && (
+        request.auth.uid == userId ||
+        (resource != null && resource.data.shopId != null && (
+          request.auth.uid == resource.data.shopId ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.shopId == resource.data.shopId)
+        ))
+      ));
+
+      allow delete: if isMasterAdmin() || (isSignedIn() && (
+        request.auth.uid == userId ||
+        (resource != null && resource.data.shopId != null && (
+          request.auth.uid == resource.data.shopId ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.shopId == resource.data.shopId)
+        ))
+      ));
     }
   }
 }

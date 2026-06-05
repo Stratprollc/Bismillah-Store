@@ -10,7 +10,6 @@ import {
   ShieldCheck,
   Bot
 } from 'lucide-react';
-import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
 import { db, collection, doc, updateDoc, deleteDoc, addDoc, handleFirestoreError, OperationType } from '../firebase';
 import { fuzzyMatchProduct } from '../utils/productMatcher';
 
@@ -377,16 +376,16 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
     setIsProcessing(true);
 
     // Define tool declarations for Jarvis
-    const tools: FunctionDeclaration[] = [
+    const tools: any[] = [
       {
         name: "addProduct",
         parameters: {
-          type: Type.OBJECT,
+          type: "OBJECT",
           properties: {
-            name: { type: Type.STRING, description: "Name of the product in Bengali or English" },
-            price: { type: Type.NUMBER, description: "Price of the product" },
-            stock: { type: Type.NUMBER, description: "Initial stock quantity" },
-            category: { type: Type.STRING, description: "Category name" }
+            name: { type: "STRING", description: "Name of the product in Bengali or English" },
+            price: { type: "NUMBER", description: "Price of the product" },
+            stock: { type: "NUMBER", description: "Initial stock quantity" },
+            category: { type: "STRING", description: "Category name" }
           },
           required: ["name", "price", "stock"]
         }
@@ -394,39 +393,39 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
       {
         name: "checkInventory",
         parameters: {
-          type: Type.OBJECT,
+          type: "OBJECT",
           properties: {
-            productName: { type: Type.STRING, description: "Name of the product to check" }
+            productName: { type: "STRING", description: "Name of the product to check" }
           }
         }
       },
       {
         name: "addSale",
         parameters: {
-          type: Type.OBJECT,
+          type: "OBJECT",
           properties: {
             items: {
-              type: Type.ARRAY,
+              type: "ARRAY",
               items: {
-                type: Type.OBJECT,
+                type: "OBJECT",
                 properties: {
-                  productName: { type: Type.STRING, description: "Name of the product being sold" },
-                  quantity: { type: Type.NUMBER, description: "Quantity sold" }
+                  productName: { type: "STRING", description: "Name of the product being sold" },
+                  quantity: { type: "NUMBER", description: "Quantity sold" }
                 }
               }
             },
-            customerPhone: { type: Type.STRING, description: "Optional customer phone number" }
+            customerPhone: { type: "STRING", description: "Optional customer phone number" }
           }
         }
       },
       {
         name: "addCustomer",
         parameters: {
-          type: Type.OBJECT,
+          type: "OBJECT",
           properties: {
-            name: { type: Type.STRING, description: "Customer Name" },
-            phone: { type: Type.STRING, description: "Customer Phone Number" },
-            address: { type: Type.STRING, description: "Customer Address" }
+            name: { type: "STRING", description: "Customer Name" },
+            phone: { type: "STRING", description: "Customer Phone Number" },
+            address: { type: "STRING", description: "Customer Address" }
           },
           required: ["name", "phone"]
         }
@@ -434,18 +433,18 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
       {
         name: "checkCustomer",
         parameters: {
-          type: Type.OBJECT,
+          type: "OBJECT",
           properties: {
-            phoneOrName: { type: Type.STRING, description: "Customer Name or Phone Number to search for" }
+            phoneOrName: { type: "STRING", description: "Customer Name or Phone Number to search for" }
           }
         }
       },
       {
         name: "removeProduct",
         parameters: {
-          type: Type.OBJECT,
+          type: "OBJECT",
           properties: {
-            productName: { type: Type.STRING, description: "Name of the product to remove" }
+            productName: { type: "STRING", description: "Name of the product to remove" }
           },
           required: ["productName"]
         }
@@ -453,18 +452,18 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
       {
         name: "getSystemSummary",
         parameters: {
-          type: Type.OBJECT,
+          type: "OBJECT",
           properties: {}
         }
       },
       {
         name: "updateProduct",
         parameters: {
-          type: Type.OBJECT,
+          type: "OBJECT",
           properties: {
-            productName: { type: Type.STRING, description: "Name of the product to update" },
-            price: { type: Type.NUMBER, description: "New price of the product" },
-            stock: { type: Type.NUMBER, description: "New stock amount" }
+            productName: { type: "STRING", description: "Name of the product to update" },
+            price: { type: "NUMBER", description: "New price of the product" },
+            stock: { type: "NUMBER", description: "New stock amount" }
           },
           required: ["productName"]
         }
@@ -472,9 +471,9 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
       {
         name: "removeCustomer",
         parameters: {
-          type: Type.OBJECT,
+          type: "OBJECT",
           properties: {
-            phoneOrName: { type: Type.STRING, description: "Customer Name or Phone to remove" }
+            phoneOrName: { type: "STRING", description: "Customer Name or Phone to remove" }
           },
           required: ["phoneOrName"]
         }
@@ -483,15 +482,15 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
         name: "prepareInvoice",
         description: "Open Point of Sale and add items to cart",
         parameters: {
-          type: Type.OBJECT,
+          type: "OBJECT",
           properties: {
             items: {
-              type: Type.ARRAY,
+              type: "ARRAY",
               items: {
-                type: Type.OBJECT,
+                type: "OBJECT",
                 properties: {
-                  productName: { type: Type.STRING },
-                  quantity: { type: Type.NUMBER }
+                  productName: { type: "STRING" },
+                  quantity: { type: "NUMBER" }
                 }
               }
             }
@@ -502,9 +501,9 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
         name: "navigateApp",
         description: "Navigate to a specific part of the app (dashboard, inventory, sales, customers, reports, settings, pos)",
         parameters: {
-          type: Type.OBJECT,
+          type: "OBJECT",
           properties: {
-            destination: { type: Type.STRING }
+            destination: { type: "STRING" }
           },
           required: ["destination"]
         }
@@ -513,11 +512,11 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
         name: "updateSettings",
         description: "Modify the shop settings (e.g. language, vat rate, currency, shop name)",
         parameters: {
-          type: Type.OBJECT,
+          type: "OBJECT",
           properties: {
-            shopName: { type: Type.STRING, description: "Shop name" },
-            currency: { type: Type.STRING, description: "Currency symbol, e.g. ৳ or $" },
-            taxRate: { type: Type.NUMBER, description: "Tax / VAT rate percentage" }
+            shopName: { type: "STRING", description: "Shop name" },
+            currency: { type: "STRING", description: "Currency symbol, e.g. ৳ or $" },
+            taxRate: { type: "NUMBER", description: "Tax / VAT rate percentage" }
           }
         }
       },
@@ -525,9 +524,9 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
         name: "sendCustomerReminder",
         description: "Send a due payment reminder to a customer via WhatsApp",
         parameters: {
-          type: Type.OBJECT,
+          type: "OBJECT",
           properties: {
-            phoneOrName: { type: Type.STRING, description: "Customer Name or Phone to send reminder to" }
+            phoneOrName: { type: "STRING", description: "Customer Name or Phone to send reminder to" }
           },
           required: ["phoneOrName"]
         }
@@ -536,7 +535,7 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
         name: "checkLowStock",
         description: "Get a list of products that are currently out of stock or have low stock",
         parameters: {
-          type: Type.OBJECT,
+          type: "OBJECT",
           properties: {}
         }
       },
@@ -544,9 +543,9 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
         name: "checkCustomerDue",
         description: "Check the total unpaid due amount of a specific customer",
         parameters: {
-          type: Type.OBJECT,
+          type: "OBJECT",
           properties: {
-            phoneOrName: { type: Type.STRING, description: "Customer Name or Phone" }
+            phoneOrName: { type: "STRING", description: "Customer Name or Phone" }
           },
           required: ["phoneOrName"]
         }
@@ -555,22 +554,22 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
         name: "createDirectSale",
         description: "Create a completed sale directly without going to Point of Sale. Very important for immediate sales. Use this when user says exactly what is sold.",
         parameters: {
-          type: Type.OBJECT,
+          type: "OBJECT",
           properties: {
             items: {
-              type: Type.ARRAY,
+              type: "ARRAY",
               items: {
-                type: Type.OBJECT,
+                type: "OBJECT",
                 properties: {
-                  productName: { type: Type.STRING },
-                  quantity: { type: Type.NUMBER }
+                  productName: { type: "STRING" },
+                  quantity: { type: "NUMBER" }
                 }
               }
             },
-            customerPhoneOrName: { type: Type.STRING, description: "Customer Phone or Name if existing customer. Empty if walk-in / retail." },
-            paidAmount: { type: Type.NUMBER, description: "Amount paid by customer. If missing, assume full payment for retail." },
-            printInvoice: { type: Type.BOOLEAN, description: "Whether to print the invoice immediately." },
-            sendWhatsApp: { type: Type.BOOLEAN, description: "Whether to send the invoice via WhatsApp to the customer." }
+            customerPhoneOrName: { type: "STRING", description: "Customer Phone or Name if existing customer. Empty if walk-in / retail." },
+            paidAmount: { type: "NUMBER", description: "Amount paid by customer. If missing, assume full payment for retail." },
+            printInvoice: { type: "BOOLEAN", description: "Whether to print the invoice immediately." },
+            sendWhatsApp: { type: "BOOLEAN", description: "Whether to send the invoice via WhatsApp to the customer." }
           },
           required: ["items"]
         }
@@ -579,7 +578,7 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
         name: "printLatestInvoice",
         description: "Print the latest invoice / receipt",
         parameters: {
-          type: Type.OBJECT,
+          type: "OBJECT",
           properties: {}
         }
       },
@@ -587,7 +586,7 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
         name: "sendLatestInvoiceWhatsApp",
         description: "Send the most recently created invoice to the customer via WhatsApp. Use this when the user says 'Yes' after being asked if they want to send it.",
         parameters: {
-          type: Type.OBJECT,
+          type: "OBJECT",
           properties: {}
         }
       },
@@ -595,9 +594,9 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
         name: "getSalesSummary",
         description: "Get a summary of sales for a specific period (today, week, month)",
         parameters: {
-          type: Type.OBJECT,
+          type: "OBJECT",
           properties: {
-            period: { type: Type.STRING, enum: ["today", "week", "month"], description: "The time period for sales summary" }
+            period: { type: "STRING", enum: ["today", "week", "month"], description: "The time period for sales summary" }
           },
           required: ["period"]
         }
@@ -606,9 +605,9 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
         name: "getCustomerDetails",
         description: "Get detailed history and balance for a specific customer",
         parameters: {
-          type: Type.OBJECT,
+          type: "OBJECT",
           properties: {
-            phoneOrName: { type: Type.STRING, description: "Customer name or phone" }
+            phoneOrName: { type: "STRING", description: "Customer name or phone" }
           },
           required: ["phoneOrName"]
         }
@@ -617,11 +616,9 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
 
     try {
       console.log("Processing command:", command, "Language:", language, "Voice Gender:", voiceGender);
-      const apiKey = process.env.GEMINI_API_KEY;
       
-      // Local fallback for common commands if API is missing or fails
       const lowerCmd = command.toLowerCase();
-      if (!apiKey || lowerCmd.includes("সারাংশ") || lowerCmd.includes("summary") || lowerCmd.includes("আয়") || lowerCmd.includes("revenue") || lowerCmd.includes("হিসাব")) {
+      if (lowerCmd.includes("সারাংশ") || lowerCmd.includes("summary") || lowerCmd.includes("আয়") || lowerCmd.includes("revenue") || lowerCmd.includes("হিসাব")) {
         const todaySales = systemData.sales.filter(s => new Date(s.date).toDateString() === new Date().toDateString());
         const totalRevenue = todaySales.reduce((acc, s) => acc + (s.totalAmount || 0), 0);
         const feedback = language === 'bn'
@@ -633,12 +630,11 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
         return;
       }
 
-      const ai = new GoogleGenAI({ apiKey }); 
-      
-      const response = await ai.models.generateContent({
-        model: "gemini-flash-latest",
-        contents: command,
-        config: {
+      const responseFetch = await fetch('/api/gemini/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: command,
           systemInstruction: `You are the AI Assistant for Bismillah Store Management System. 
 
           # CRITICAL LANGUAGE PROTOCOL:
@@ -661,7 +657,7 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
           2. Use 'createDirectSale' IMMEDIATELY.
           3. Confirm: "হাবিবের ৫ কেজি আলু আর ১০ কেজি ময়দার সেল অ্যাড করা হয়েছে। টোটাল বিল হয়েছে... টাকা, জমা... টাকা, বকেয়া... টাকা।"
           4. ASK: "আমি কি ইনভয়েসটি হোয়াটসঅ্যাপে পাঠিয়ে দিবো?" (Should I send the invoice on WhatsApp?).
-          5. If they say "Yes" or "পাঠিয়ে দাও", use 'sendLatestInvoiceWhatsApp'.
+          5. If they say "Yes" or "পাঠিয়ে দাও", use 'sendLatestInvoiceWhatsApp'.
           
           # ACCESS & KNOWLEDGE:
           - You have full access to database (Inventory, Customers, Sales).
@@ -678,12 +674,16 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
           
           # FUNCTION USAGE:
           Execute tools when requested/implied and confirm in ${language === 'bn' ? 'বাংলা' : 'English'}.`,
-          tools: [{ functionDeclarations: tools }]
-        }
+          tools: [{ functionDeclarations: tools }],
+          config: { model: "gemini-1.5-flash-latest" }
+        })
       });
 
-      const text = response.text || "";
-      const fCalls = response.functionCalls;
+      if (!responseFetch.ok) throw new Error("API request failed");
+      const data = await responseFetch.json();
+
+      const text = data.text || "";
+      const fCalls = data.functionCalls;
       let accumulatedSpeech = "";
 
       if (fCalls) {
