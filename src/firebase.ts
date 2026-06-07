@@ -93,6 +93,53 @@ async function testConnection() {
 }
 testConnection();
 
+export const deleteShopAllData = async (shopId: string) => {
+  if (!shopId) return;
+  const collectionsToClear = [
+    'products', 'sales', 'customers', 'customer_orders', 'categories', 
+    'users', 'employees', 'expenses', 'investments', 'staff_salaries', 
+    'stockRecords', 'branches', 'recycleBin', 'customer_logs', 
+    'due_payments', 'notes', 'warranty_records', 'daily_closings',
+    'suppliers'
+  ];
+
+  const failures: string[] = [];
+
+  for (const collName of collectionsToClear) {
+    try {
+      const q = query(collection(db, collName), where('shopId', '==', shopId));
+      const snap = await getDocs(q);
+      const batchPromises = snap.docs.map(docSnap => deleteDoc(doc(db, collName, docSnap.id)));
+      await Promise.all(batchPromises);
+    } catch (err) {
+      console.error(`Error deleting shop records in collection: ${collName}`, err);
+      failures.push(collName);
+    }
+  }
+
+  // Also try clearing records in collections where the field might be nested or named slightly differently
+  // E.g., user profiles or specific items
+  try {
+    const qSettings = doc(db, 'settings', shopId);
+    await deleteDoc(qSettings);
+  } catch (err) {
+    console.error('Error deleting settings doc:', err);
+    failures.push('settings doc');
+  }
+
+  try {
+    const qShop = doc(db, 'shops', shopId);
+    await deleteDoc(qShop);
+  } catch (err) {
+    console.error('Error deleting shop doc:', err);
+    failures.push('shop doc');
+  }
+
+  if (failures.length > 0) {
+    throw new Error(`Failed to delete some records from collection(s): ${failures.join(', ')}. Please check your admin privileges in firestore.rules.`);
+  }
+};
+
 export { 
   collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, 
   query, where, orderBy, limit, onSnapshot, signInWithPopup, signOut, onAuthStateChanged,

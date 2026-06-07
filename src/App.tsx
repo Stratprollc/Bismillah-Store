@@ -112,7 +112,11 @@ import {
   VolumeX,
   Copy,
   Delete,
-  Star
+  Star,
+  ShieldAlert,
+  ShieldCheck,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -125,6 +129,7 @@ import { SellerOrdersView } from './components/SellerOrdersView';
 import Dashboard from './components/Dashboard';
 
 import { fuzzyMatchProduct } from './utils/productMatcher';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   db, 
@@ -154,7 +159,8 @@ import {
   handleFirestoreError,
   increment,
   serverTimestamp,
-  writeBatch
+  writeBatch,
+  deleteShopAllData
 } from './firebase';
 
 import { 
@@ -882,6 +888,7 @@ interface RecycleItem {
   deletedAt: any;
   deletedBy: string;
   expiresAt: any;
+  shopId?: string;
 }
 
 import { FIXED_CATEGORIES } from './Categories'; //�. পশু স�. বিড়াল পরিচর্যা", " সরঞ্জাম", "৬৬. শিক্ষা সামগ্রী",
@@ -1106,7 +1113,7 @@ const fileToBase64 = (file: File): Promise<string> => {
 
 const moveToRecycleBin = async (entityType: RecycleItem['entityType'], originalId: string, data: any, shopId: string | undefined | null) => {
   try {
-    const finalShopId = shopId || (window as any)._currentShopId || (user as any)?.shopId;
+    const finalShopId = shopId || (window as any)._currentShopId;
     const deletedAt = new Date();
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 30);
@@ -2076,6 +2083,8 @@ function SettingsPanel({
   const [logoPreview, setLogoPreview] = useState<string | null>(settings.logoBase64 || null);
   const [faviconPreview, setFaviconPreview] = useState<string | null>(settings.faviconBase64 || null);
 
+  const isAuthorized = currentUserEmail === 'stratproamz@gmail.com';
+
   useEffect(() => {
     const handleClick = () => setConfirmDeleteId(null);
     window.addEventListener('click', handleClick);
@@ -2084,6 +2093,10 @@ function SettingsPanel({
 
   const handleShopSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isAuthorized) {
+      alert("Only stratproamz@gmail.com is authorized to change or update settings.");
+      return;
+    }
     const form = e.target as HTMLFormElement;
     const formData = new FormData(form);
     const logoFile = (form.querySelector('input[type="file"]') as HTMLInputElement)?.files?.[0];
@@ -2131,6 +2144,10 @@ function SettingsPanel({
 
   const handleUserSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isAuthorized) {
+      alert("Only stratproamz@gmail.com is authorized to add users.");
+      return;
+    }
     const form = e.target as HTMLFormElement;
     const formData = new FormData(form);
     onAddUser({
@@ -2154,6 +2171,15 @@ function SettingsPanel({
         <h2 className="text-3xl font-bold text-gray-900">Settings & Admin</h2>
         <p className="text-gray-500">Manage your shop profile and team access.</p>
       </header>
+
+      {!isAuthorized && (
+        <div className="flex items-center gap-3 p-4 bg-amber-50 border border-amber-200/60 text-amber-950 rounded-2xl shadow-xs">
+          <Lock className="w-5 h-5 text-amber-500 shrink-0 animate-pulse" />
+          <div className="text-sm">
+            <span className="font-bold">View-Only Mode:</span> This page contains administrative settings. Only <strong className="font-black text-amber-950">stratproamz@gmail.com</strong> is authorized to edit or update these configurations.
+          </div>
+        </div>
+      )}
 
       <div className="flex gap-4 border-b border-gray-200 overflow-x-auto hide-scrollbar">
         <button 
@@ -2191,7 +2217,8 @@ function SettingsPanel({
             Shop Information
           </h3>
           <form onSubmit={handleShopSubmit} className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <fieldset disabled={!isAuthorized} className="space-y-6 w-full">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="md:col-span-2 flex items-center gap-6 p-6 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
                 <div className="w-24 h-24 bg-white rounded-2xl border border-gray-100 flex items-center justify-center overflow-hidden shadow-sm">
                   {logoPreview ? (
@@ -2458,6 +2485,7 @@ function SettingsPanel({
               {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
               {isSaving ? 'Updating...' : 'Update Settings'}
             </button>
+            </fieldset>
           </form>
         </div>
       )}
@@ -2467,8 +2495,9 @@ function SettingsPanel({
           <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
             <h3 className="text-lg font-bold mb-6">Add New User</h3>
             <form onSubmit={handleUserSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Full Name</label>
+              <fieldset disabled={!isAuthorized} className="contents">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Full Name</label>
                 <input name="displayName" required className="w-full px-4 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none text-sm" />
               </div>
               <div>
@@ -2489,11 +2518,12 @@ function SettingsPanel({
                 </select>
               </div>
               <div className="lg:col-span-4 flex justify-end">
-                <button type="submit" className="px-6 py-2 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center gap-2">
+                <button type="submit" className="px-6 py-2 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
                   <Plus className="w-4 h-4" />
                   Add User
                 </button>
               </div>
+              </fieldset>
             </form>
           </div>
 
@@ -2519,6 +2549,7 @@ function SettingsPanel({
                     </td>
                     <td className="px-6 py-4 text-right">
                       <button 
+                        disabled={!isAuthorized}
                         onClick={(e) => {
                           e.stopPropagation();
                           if (confirmDeleteId === u.id) {
@@ -2532,8 +2563,8 @@ function SettingsPanel({
                           confirmDeleteId === u.id 
                             ? "bg-red-600 text-white hover:bg-red-700 shadow-lg scale-110" 
                             : "text-gray-400 hover:text-red-600 hover:bg-red-50"
-                        }`}
-                        title={confirmDeleteId === u.id ? "Click again to confirm" : "Delete User"}
+                        } disabled:opacity-30 disabled:cursor-not-allowed`}
+                        title={!isAuthorized ? "Only stratproamz@gmail.com can delete users" : (confirmDeleteId === u.id ? "Click again to confirm" : "Delete User")}
                       >
                         {confirmDeleteId === u.id ? (
                           <span className="text-[10px] font-bold px-1 animate-pulse">Confirm?</span>
@@ -2851,12 +2882,52 @@ function RecycleBin({ items, onRestore }: { items: any[], onRestore: (item: any)
 
 function ShopManagement({ shops }: { shops: any[] }) {
   const [searchTerm, setSearchTerm] = useState('');
+  const [confirmingBlock, setConfirmingBlock] = useState<any | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState<any | null>(null);
+  const [statusNotification, setStatusNotification] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const filteredShops = shops.filter(shop => 
     (shop.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
     (shop.ownerEmail || shop.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
     (shop.shopCode || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const executeToggleBlock = async (shop: any) => {
+     const isBlocked = shop.status === 'blocked';
+     try {
+         await updateDoc(doc(db, 'shops', shop.id), {
+             status: isBlocked ? 'active' : 'blocked'
+         });
+         setConfirmingBlock(null);
+         setStatusNotification({
+             type: 'success',
+             text: `Merchant successfully ${isBlocked ? 'unblocked' : 'blocked'}.`
+         });
+     } catch (e) {
+         console.error('Error toggling shop status:', e);
+         setStatusNotification({
+             type: 'error',
+             text: 'Failed to update merchant status. Please try again.'
+         });
+     }
+  };
+
+  const executeDelete = async (shop: any) => {
+     try {
+         await deleteShopAllData(shop.id);
+         setConfirmingDelete(null);
+         setStatusNotification({
+             type: 'success',
+             text: 'Merchant and all associated store data successfully deleted from the database.'
+         });
+     } catch (e) {
+         console.error('Error deleting merchant:', e);
+         setStatusNotification({
+             type: 'error',
+             text: 'Failed to delete merchant. Please verify your admin credentials.'
+         });
+     }
+  };
 
   return (
     <div className="space-y-6">
@@ -2890,7 +2961,7 @@ function ShopManagement({ shops }: { shops: any[] }) {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: idx * 0.1 }}
-            className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm hover:shadow-xl transition-all group"
+            className={`bg-white p-6 rounded-3xl border shadow-sm hover:shadow-xl transition-all group ${shop?.status === 'blocked' ? 'border-rose-200 bg-rose-50/10' : 'border-gray-100'}`}
           >
             <div className="flex items-start justify-between mb-4">
               <div className="w-16 h-16 bg-gray-50 rounded-2xl overflow-hidden flex items-center justify-center border border-gray-100">
@@ -2901,9 +2972,15 @@ function ShopManagement({ shops }: { shops: any[] }) {
                 )}
               </div>
               <div className="flex flex-col items-end gap-2">
-                <span className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[10px] font-black uppercase tracking-widest">
+                <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${shop?.status === 'blocked' ? 'bg-rose-50 text-rose-600 border border-rose-100' : 'bg-indigo-50 text-indigo-600'}`}>
                   {shop?.type || 'Shop'}
                 </span>
+                {shop?.status === 'blocked' && (
+                  <span className="px-2 py-0.5 bg-rose-100 text-rose-700 rounded-lg text-[9px] font-black uppercase tracking-wider flex items-center gap-1">
+                    <ShieldAlert className="w-3 h-3 animate-pulse" />
+                    Blocked
+                  </span>
+                )}
                 {shop?.shopCode && (
                   <span className="px-3 py-1 bg-slate-100 text-slate-700 rounded-full text-[10px] font-black uppercase tracking-widest font-mono">
                     #{shop.shopCode}
@@ -2936,35 +3013,196 @@ function ShopManagement({ shops }: { shops: any[] }) {
               <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
                 Registered: {shop.setupDate ? new Date(shop.setupDate).toLocaleDateString() : (shop.createdAt ? new Date(shop.createdAt).toLocaleDateString() : 'N/A')}
               </p>
-              <button 
-                onClick={async () => {
-                   const confirmed = window.confirm('Are you sure you want to delete this merchant and all their data? This action is irreversible.');
-                   if (!confirmed) return;
-                   
-                   try {
-                       await deleteDoc(doc(db, 'shops', shop.id));
-                       alert('Merchant deleted successfully.');
-                   } catch (e) {
-                       console.error('Error deleting merchant:', e);
-                       alert('Failed to delete merchant. Please try again.');
-                   }
-                }}
-                className="p-2 text-red-500 hover:bg-red-50 rounded-xl transition-all"
-              >
-                <Trash2 className="w-5 h-5" />
-              </button>
-              <button className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all">
-                <ChevronRight className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setConfirmingBlock(shop)}
+                  title={shop.status === 'blocked' ? "Enable Merchant" : "Block Merchant"}
+                  className={`p-2 rounded-xl transition-all cursor-pointer ${shop.status === 'blocked' ? 'text-emerald-600 hover:bg-emerald-50' : 'text-amber-500 hover:bg-amber-50'}`}
+                >
+                  {shop.status === 'blocked' ? <ShieldCheck className="w-5 h-5" /> : <ShieldAlert className="w-5 h-5" />}
+                </button>
+
+                <button 
+                  onClick={() => setConfirmingDelete(shop)}
+                  title="Delete Merchant & Clear Records"
+                  className="p-2 text-red-500 hover:bg-red-50 rounded-xl transition-all cursor-pointer"
+                >
+                  <Trash2 className="w-5 h-5" />
+                </button>
+                <button className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all">
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+              </div>
             </div>
           </motion.div>
         ))}
       </div>
+
+      {createPortal(
+        <AnimatePresence>
+          {/* Custom Confirmation Modal for Blocking */}
+          {confirmingBlock && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+            >
+              <motion.div 
+                initial={{ scale: 0.95, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.95, opacity: 0, y: 20 }}
+                className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl border border-slate-100"
+              >
+                <div className="flex items-center gap-3 text-amber-600 mb-4">
+                  <ShieldAlert className="w-8 h-8" />
+                  <h2 className="text-xl font-black text-slate-800">
+                    {confirmingBlock.status === 'blocked' ? 'Unblock' : 'Block'} Merchant Store?
+                  </h2>
+                </div>
+                <p className="text-slate-600 text-sm font-medium mb-6">
+                  Are you sure you want to {confirmingBlock.status === 'blocked' ? 'unblock (enable)' : 'block (disable)'} <strong className="text-slate-800">{confirmingBlock.name || 'this shop'}</strong>? 
+                  {confirmingBlock.status === 'blocked' ? (
+                    " This will restore system access for the merchant and their staff instantly."
+                  ) : (
+                    " Blocked merchants and their staff will be immediately logged out and forbidden from logging back in."
+                  )}
+                </p>
+                <div className="flex items-center justify-end gap-3">
+                  <button 
+                    onClick={() => setConfirmingBlock(null)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-sm rounded-xl transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={() => executeToggleBlock(confirmingBlock)}
+                    className={`px-5 py-2 text-white font-bold text-sm rounded-xl transition-all shadow-lg cursor-pointer ${
+                      confirmingBlock.status === 'blocked' 
+                        ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20' 
+                        : 'bg-amber-600 hover:bg-amber-700 shadow-amber-500/20'
+                    }`}
+                  >
+                    Yes, {confirmingBlock.status === 'blocked' ? 'Unblock' : 'Block'}
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+
+          {/* Custom Confirmation Modal for Deleting */}
+          {confirmingDelete && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+            >
+              <motion.div 
+                initial={{ scale: 0.95, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.95, opacity: 0, y: 20 }}
+                className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl border border-slate-100"
+              >
+                <div className="flex items-center gap-3 text-rose-600 mb-4">
+                  <Trash2 className="w-8 h-8" />
+                  <h2 className="text-xl font-black text-slate-800">Delete Merchant Store?</h2>
+                </div>
+                <p className="text-slate-600 text-sm font-medium mb-6">
+                  Are you sure you want to permanently delete <strong className="text-slate-800">{confirmingDelete.name || 'this shop'}</strong> and ALL their database records? 
+                  <span className="block mt-2 font-black text-rose-600 uppercase text-xs tracking-widest">
+                    ⚠️ This action is completely irreversible!
+                  </span>
+                </p>
+                <div className="flex items-center justify-end gap-3">
+                  <button 
+                    onClick={() => setConfirmingDelete(null)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-sm rounded-xl transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={() => executeDelete(confirmingDelete)}
+                    className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-sm rounded-xl transition-all shadow-lg shadow-rose-500/20 cursor-pointer"
+                  >
+                    Yes, Permanently Delete
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+
+          {/* Status Notification Modal */}
+          {statusNotification && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+            >
+              <motion.div 
+                initial={{ scale: 0.95, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.95, opacity: 0, y: 20 }}
+                className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl border border-slate-100"
+              >
+                <div className="flex items-center gap-3 mb-4">
+                  {statusNotification.type === 'success' ? (
+                    <ShieldCheck className="w-8 h-8 text-emerald-600" />
+                  ) : (
+                    <ShieldAlert className="w-8 h-8 text-rose-600" />
+                  )}
+                  <h2 className="text-xl font-black text-slate-800">
+                    {statusNotification.type === 'success' ? 'Success' : 'Error'}
+                  </h2>
+                </div>
+                <p className="text-slate-600 text-sm font-medium mb-6">
+                  {statusNotification.text}
+                </p>
+                <div className="flex items-center justify-end">
+                  <button 
+                    onClick={() => setStatusNotification(null)}
+                    className="px-6 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold text-sm rounded-xl transition-all shadow-lg shadow-black/10 cursor-pointer"
+                  >
+                    OK
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
     </div>
   );
 }
 
 export default function App() {
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('theme_dark');
+      if (saved !== null) {
+        return saved === 'true';
+      }
+      return typeof window !== 'undefined' ? window.matchMedia('(prefers-color-scheme: dark)').matches : false;
+    } catch (e) {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      if (darkMode) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+      localStorage.setItem('theme_dark', String(darkMode));
+    } catch (e) {
+      console.error('Error synchronizing dark mode class', e);
+    }
+  }, [darkMode]);
+
   useEffect(() => {
     console.log("ShopMaster App Initializing...");
   }, []);
@@ -3291,6 +3529,21 @@ export default function App() {
             const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
             if (userDoc.exists()) {
               const data = userDoc.data();
+              
+              // Validate if their shop is blocked
+              const shopDoc = await getDoc(doc(db, 'shops', data.shopId));
+              if (shopDoc.exists() && shopDoc.data().status === 'blocked') {
+                await signOut(auth);
+                setUser(null);
+                setIsOnboarded(null);
+                localStorage.removeItem('shopmaster_user');
+                setAuthError("This shop is blocked or disabled by Admin. Please contact your manager.");
+                setNotification({ message: "Shop Blocked! Please contact support.", type: 'error' });
+                setAuthChecked(true);
+                setLoading(false);
+                return;
+              }
+
               const userData = {
                 uid: firebaseUser.uid,
                 email: firebaseUser.email || '',
@@ -3306,6 +3559,7 @@ export default function App() {
               // Might be a Merchant (logged in via Google or first time)
               let finalShopId = firebaseUser.uid;
               let onboardStatus = false;
+              let isBlocked = false;
 
               try {
                 // 1. Direct match: doc ID is firebaseUser.uid
@@ -3313,6 +3567,9 @@ export default function App() {
                 if (shopDoc.exists()) {
                   finalShopId = firebaseUser.uid;
                   onboardStatus = true;
+                  if (shopDoc.data().status === 'blocked') {
+                    isBlocked = true;
+                  }
                 } else {
                   // 2. Try searching by ownerUid
                   const qByUid = query(collection(db, 'shops'), where('ownerUid', '==', firebaseUser.uid));
@@ -3321,6 +3578,9 @@ export default function App() {
                     const foundShop = snapByUid.docs[0];
                     finalShopId = foundShop.id;
                     onboardStatus = true;
+                    if (foundShop.data().status === 'blocked') {
+                      isBlocked = true;
+                    }
                   } else if (firebaseUser.email) {
                     // 3. Try searching by ownerEmail
                     const qByEmail = query(collection(db, 'shops'), where('ownerEmail', '==', firebaseUser.email));
@@ -3329,11 +3589,26 @@ export default function App() {
                       const foundShop = snapByEmail.docs[0];
                       finalShopId = foundShop.id;
                       onboardStatus = true;
+                      if (foundShop.data().status === 'blocked') {
+                        isBlocked = true;
+                      }
                     }
                   }
                 }
               } catch (shopSearchErr) {
                 console.error("Error searching shops during login setup:", shopSearchErr);
+              }
+
+              if (isBlocked) {
+                await signOut(auth);
+                setUser(null);
+                setIsOnboarded(null);
+                localStorage.removeItem('shopmaster_user');
+                setAuthError("Your merchant account has been blocked or disabled by Admin. Please contact stratproamz@gmail.com for assistance.");
+                setNotification({ message: "Account Blocked! Please contact support.", type: 'error' });
+                setAuthChecked(true);
+                setLoading(false);
+                return;
               }
 
               const userData = {
@@ -3966,6 +4241,12 @@ export default function App() {
       const foundShop = shopSnapshot.docs[0];
       const foundShopId = foundShop.id;
 
+      if (foundShop.data().status === 'blocked') {
+        setAuthError(st('loginTitle') === 'Business Management Suite' ? "This shop is blocked or disabled. Please contact your manager." : "এই দোকানটি ব্লক বা নিষ্ক্রিয় করা হয়েছে। অনুগ্রহ করে ম্যানেজারের সাথে যোগাযোগ করুন।");
+        setLoading(false);
+        return;
+      }
+
       // 2. Log in using username and password
       const email = `${username}@bismillahstore.local`;
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
@@ -4018,6 +4299,7 @@ export default function App() {
       
       let finalShopId = googleUser.uid;
       let onboardStatus = false;
+      let isBlocked = false;
 
       if (isMasterAdmin) {
         finalShopId = 'master';
@@ -4029,6 +4311,9 @@ export default function App() {
           if (shopDoc.exists()) {
             finalShopId = googleUser.uid;
             onboardStatus = true;
+            if (shopDoc.data().status === 'blocked') {
+              isBlocked = true;
+            }
           } else {
             // 2. Try searching by ownerUid
             const qByUid = query(collection(db, 'shops'), where('ownerUid', '==', googleUser.uid));
@@ -4037,6 +4322,9 @@ export default function App() {
               const foundShop = snapByUid.docs[0];
               finalShopId = foundShop.id;
               onboardStatus = true;
+              if (foundShop.data().status === 'blocked') {
+                isBlocked = true;
+              }
             } else if (googleUser.email) {
               // 3. Try searching by ownerEmail
               const qByEmail = query(collection(db, 'shops'), where('ownerEmail', '==', googleUser.email));
@@ -4045,12 +4333,25 @@ export default function App() {
                 const foundShop = snapByEmail.docs[0];
                 finalShopId = foundShop.id;
                 onboardStatus = true;
+                if (foundShop.data().status === 'blocked') {
+                  isBlocked = true;
+                }
               }
             }
           }
         } catch (shopSearchErr) {
           console.error("Error searching shops during Google Login:", shopSearchErr);
         }
+      }
+
+      if (isBlocked) {
+        await signOut(auth);
+        setUser(null);
+        setIsOnboarded(null);
+        localStorage.removeItem('shopmaster_user');
+        setAuthError("Your merchant account has been blocked or disabled by Admin. Please contact stratproamz@gmail.com for assistance.");
+        setNotification({ message: "Account Blocked! Please contact support.", type: 'error' });
+        return;
       }
 
       const userData = { 
@@ -4596,6 +4897,10 @@ export default function App() {
   };
 
   const handleSaveSettings = async (newSettings: ShopSettings) => {
+    if (user?.email !== 'stratproamz@gmail.com') {
+      setNotification({ message: 'Error: Only stratproamz@gmail.com is authorized to change or update settings.', type: 'error' });
+      return;
+    }
     setIsSavingSettings(true);
     try {
       if (!user || !user.shopId) throw new Error("No shopId found");
@@ -4630,6 +4935,10 @@ export default function App() {
   };
 
   const handleAddUser = async (newUser: Omit<AppUser, 'id'>) => {
+    if (user?.email !== 'stratproamz@gmail.com') {
+      setNotification({ message: 'Error: Only stratproamz@gmail.com is authorized to add users.', type: 'error' });
+      return;
+    }
     if (!user?.shopId) return;
     // Check if username already exists
     const exists = appUsers.some(u => u.username.toLowerCase() === newUser.username.toLowerCase());
@@ -4662,6 +4971,10 @@ export default function App() {
   };
 
   const handleDeleteUser = async (userId: string) => {
+    if (user?.email !== 'stratproamz@gmail.com') {
+      setNotification({ message: 'Error: Only stratproamz@gmail.com is authorized to delete users.', type: 'error' });
+      return;
+    }
     try {
       const userToDelete = appUsers.find(u => u.id === userId);
       if (userToDelete) {
@@ -4798,7 +5111,6 @@ export default function App() {
     }
   };
 
-
   const handleAddExpense = async (newExpense: Omit<Expense, 'id'>) => {
     try {
       if (!user?.shopId) return;
@@ -4904,7 +5216,7 @@ export default function App() {
   }
 
   if (!user) {
-    const isBn = systemLang === 'bn';
+    const st = (key: keyof typeof SYSTEM_TRANSLATIONS['en']) => (SYSTEM_TRANSLATIONS['en'] as any)[key];
 
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 relative overflow-hidden font-sans">
@@ -4939,9 +5251,9 @@ export default function App() {
             <div className="relative z-20 mt-12 md:mt-0">
               <div className="space-y-6">
                 {[
-                  { icon: ShieldCheck, title: isBn ? 'সুরক্ষিত লেনদেন' : 'Secure Transactions' },
-                  { icon: Sparkles, title: isBn ? 'এআই চালিত মেসেজ' : 'AI Powered Messaging' },
-                  { icon: TrendingUp, title: isBn ? 'রিয়েল-টাইম রিপোর্ট' : 'Real-time Analytics' }
+                  { icon: ShieldCheck, title: 'Secure Transactions' },
+                  { icon: Sparkles, title: 'AI Powered Messaging' },
+                  { icon: TrendingUp, title: 'Real-time Analytics' }
                 ].map((item, idx) => (
                   <div key={idx} className="flex items-center gap-4 group">
                     <div className="h-10 w-10 bg-white/10 group-hover:bg-white/20 transition-colors rounded-xl flex items-center justify-center border border-white/20">
@@ -4957,27 +5269,7 @@ export default function App() {
           {/* Right Side: Login Form */}
           <div className="flex-1 p-8 md:p-12 flex flex-col">
             <div className="mb-10">
-              <div className="flex items-center justify-between mb-8">
-                <div className="flex gap-2">
-                  {[
-                    { id: 'bn', label: 'বাংলা' },
-                    { id: 'en', label: 'EN' },
-                    { id: 'ar', label: 'العربية' }
-                  ].map(lang => (
-                    <button
-                      key={lang.id}
-                      onClick={() => setShopSettings(prev => ({ ...prev, systemLanguage: lang.id as any }))}
-                      className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition-all ${shopSettings.systemLanguage === lang.id ? 'bg-indigo-600 text-white shadow-lg' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}
-                    >
-                      {lang.label}
-                    </button>
-                  ))}
-                </div>
-                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
-                  <Globe className="w-3 h-3" />
-                  {st('systemStatus')}
-                </div>
-              </div>
+              {/* Hidden system status banner */}
 
               <div className="flex p-1.5 bg-gray-100 rounded-2xl mb-8 font-semibold text-sm">
                 <button 
@@ -5128,7 +5420,7 @@ export default function App() {
                 >
                   <Sparkles className="w-5 h-5 text-indigo-600 group-hover:scale-110 transition-transform" />
                   <span>
-                    {isBn ? "গ্রাহক সেবা পোর্টাল (অর্ডার ও সাধারণ খতিয়ান)" : "Customer Self-Service Portal"}
+                    Customer Self-Service Portal
                   </span>
                 </button>
               </div>
@@ -5151,16 +5443,16 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <div className={`min-h-screen bg-white flex flex-col lg:flex-row ${isRtl ? 'rtl' : ''}`} dir={isRtl ? 'rtl' : 'ltr'}>
+      <div className={`min-h-screen bg-white dark:bg-slate-950 flex flex-col lg:flex-row ${isRtl ? 'rtl' : ''}`} dir={isRtl ? 'rtl' : 'ltr'}>
         {/* Mobile Header */}
-        <header className="lg:hidden bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between sticky top-0 z-50 shadow-sm">
+        <header className="lg:hidden bg-white dark:bg-slate-900 border-b border-gray-200 dark:border-slate-800 px-4 py-3 flex items-center justify-between sticky top-0 z-50 shadow-sm">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
               <Building2 className="w-5 h-5 text-white" />
             </div>
-            <span className="font-bold text-lg text-gray-900 truncate">{shopSettings.name}</span>
+            <span className="font-bold text-lg text-gray-900 dark:text-white truncate">{shopSettings.name}</span>
             {!isOnline && (
-              <div className="flex items-center gap-1 px-1.5 py-0.5 bg-red-100 text-red-600 rounded text-[10px] font-bold animate-pulse">
+              <div className="flex items-center gap-1 px-1.5 py-0.5 bg-red-100 dark:bg-red-950 text-red-600 dark:text-red-400 rounded text-[10px] font-bold animate-pulse">
                 <AlertTriangle className="w-3 h-3" />
                 {st('offline').toUpperCase()}
               </div>
@@ -5168,10 +5460,10 @@ export default function App() {
           </div>
           <button 
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="p-2 hover:bg-gray-100 rounded-lg transition-colors bg-gray-50 border border-gray-200"
+            className="p-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg transition-colors bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700"
             aria-label="Toggle Menu"
           >
-            {isSidebarOpen ? <X className="w-6 h-6 text-indigo-600" /> : <Menu className="w-6 h-6 text-indigo-600" />}
+            {isSidebarOpen ? <X className="w-6 h-6 text-indigo-600 dark:text-indigo-400" /> : <Menu className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />}
           </button>
         </header>
 
@@ -5183,7 +5475,7 @@ export default function App() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setIsSidebarOpen(false)}
-              className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40 lg:hidden"
+              className="fixed inset-0 bg-black/20 dark:bg-black/55 backdrop-blur-sm z-40 lg:hidden"
             />
           )}
         </AnimatePresence>
@@ -5191,7 +5483,7 @@ export default function App() {
         {/* Sidebar */}
         <aside 
           className={`
-            fixed lg:static inset-y-0 ${isRtl ? 'right-0' : 'left-0'} z-50 bg-white border-r border-gray-100 flex flex-col shadow-2xl lg:shadow-none
+            fixed lg:static inset-y-0 ${isRtl ? 'right-0' : 'left-0'} z-50 bg-white dark:bg-slate-900 border-r border-gray-100 dark:border-slate-800 flex flex-col shadow-2xl lg:shadow-none
             h-screen w-72 lg:w-72
             transition-all duration-300 ease-in-out
             ${isSidebarOpen ? 'translate-x-0 opacity-100 flex' : (isRtl ? 'translate-x-full lg:translate-x-0 hidden lg:flex' : '-translate-x-full lg:translate-x-0 hidden lg:flex')}
@@ -5209,21 +5501,21 @@ export default function App() {
                     <Building2 className="w-6 h-6 text-white" />
                   </motion.div>
                   <div className="flex flex-col whitespace-nowrap">
-                    <span className="font-black text-xl text-gray-900 tracking-tight leading-none group-hover:text-indigo-600 transition-colors uppercase">{shopSettings.name}</span>
-                    <span className="text-[10px] font-bold text-gray-400 mt-1 uppercase tracking-widest">Business Suite</span>
+                    <span className="font-black text-xl text-gray-900 dark:text-gray-100 tracking-tight leading-none group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors uppercase">{shopSettings.name}</span>
+                    <span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 mt-1 uppercase tracking-widest">Business Suite</span>
                   </div>
                 </div>
                 
                 <button 
                   onClick={() => setIsSidebarOpen(false)}
-                  className="p-2 hover:bg-rose-50 rounded-xl transition-all text-gray-400 hover:text-rose-600 border border-transparent hover:border-rose-100 lg:hidden"
+                  className="p-2 hover:bg-rose-50 dark:hover:bg-rose-950/20 rounded-xl transition-all text-gray-400 hover:text-rose-600 border border-transparent hover:border-rose-100 lg:hidden"
                   title="Hide Sidebar"
                 >
                   <ChevronLeft className={`w-5 h-5 transition-transform ${isRtl ? 'rotate-180' : ''}`} />
                 </button>
               </div>
 
-          <nav className="flex-1 px-4 py-6 overflow-y-auto custom-scrollbar space-y-1.5 bg-white">
+          <nav className="flex-1 px-4 py-6 overflow-y-auto custom-scrollbar space-y-1.5 bg-white dark:bg-slate-900">
             {[
               { id: 'core', label: 'core', items: [
                 { id: 'dashboard', icon: LayoutDashboard, label: st('dashboard'), roles: ['admin', 'manager'], color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100' },
@@ -5279,15 +5571,15 @@ export default function App() {
                     }}
                     className={`w-full flex items-center justify-between group px-4 py-3 rounded-2xl transition-all duration-300 relative overflow-hidden ${
                       activeTab === item.id                
-                        ? `${item.bg} ${item.color} shadow-sm ring-1 ${item.border}` 
-                        : 'text-gray-500 hover:bg-white hover:text-gray-900 hover:shadow-sm'
+                        ? `${item.bg} dark:bg-indigo-950/40 dark:text-indigo-300 ${item.color} shadow-sm ring-1 ${item.border} dark:ring-indigo-900/40 dark:border-indigo-900/40` 
+                        : 'text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-slate-800 hover:text-gray-900 dark:hover:text-gray-100 hover:shadow-sm'
                     }`}
                   >
                     <div className="flex items-center gap-3 relative z-10">
                       <div className={`p-2 rounded-xl transition-all duration-300 ${
-                        activeTab === item.id ? 'bg-white' : 'bg-gray-50 group-hover:bg-white'
+                        activeTab === item.id ? 'bg-white dark:bg-slate-800' : 'bg-gray-50 dark:bg-slate-950/40 group-hover:bg-white dark:group-hover:bg-slate-800'
                       }`}>
-                        <item.icon className={`w-4 h-4 ${activeTab === item.id ? item.color : 'text-gray-400 group-hover:text-gray-600'}`} />
+                        <item.icon className={`w-4 h-4 ${activeTab === item.id ? `${item.color} dark:text-indigo-400` : 'text-gray-400 dark:text-gray-500 group-hover:text-gray-600 dark:group-hover:text-gray-300'}`} />
                       </div>
                       <span className="text-[13px] font-bold tracking-tight">{item.label}</span>
                     </div>
@@ -5303,14 +5595,14 @@ export default function App() {
             ))}
           </nav>
 
-          <div className="p-4 border-t border-gray-100 bg-white shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
-            <div className="flex items-center gap-3 p-3 bg-indigo-50/50 border border-indigo-100 rounded-2xl mb-4 group cursor-pointer hover:bg-indigo-50 transition-colors">
-              <div className="w-11 h-11 bg-white p-0.5 rounded-xl border border-indigo-100 shadow-sm overflow-hidden flex items-center justify-center text-indigo-600 font-black text-lg group-hover:scale-105 transition-transform">
+          <div className="p-4 border-t border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
+            <div className="flex items-center gap-3 p-3 bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/40 rounded-2xl mb-4 group cursor-pointer hover:bg-indigo-50 dark:hover:bg-indigo-950/40 transition-colors">
+              <div className="w-11 h-11 bg-white dark:bg-slate-800 p-0.5 rounded-xl border border-indigo-100 dark:border-indigo-900/40 shadow-sm overflow-hidden flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-black text-lg group-hover:scale-105 transition-transform">
                 {user.email?.[0].toUpperCase() || 'A'}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-[13px] font-bold text-gray-900 truncate leading-tight">{user.email?.split('@')[0] || 'Administrator'}</p>
-                <p className="text-[10px] font-bold text-indigo-500 truncate uppercase mt-0.5 tracking-wider">{user.role}</p>
+                <p className="text-[13px] font-bold text-gray-900 dark:text-slate-100 truncate leading-tight">{user.email?.split('@')[0] || 'Administrator'}</p>
+                <p className="text-[10px] font-bold text-indigo-500 dark:text-indigo-400 truncate uppercase mt-0.5 tracking-wider">{user.role}</p>
               </div>
             </div>
             <motion.button 
@@ -5322,7 +5614,7 @@ export default function App() {
                   setIsSidebarOpen(false);
                 }
               }}
-              className="w-full flex items-center justify-center gap-3 py-3 mb-2 bg-gradient-to-r from-indigo-50 to-purple-50 hover:from-indigo-600 hover:to-purple-700 hover:text-white text-indigo-700 rounded-xl transition-all font-bold text-sm border border-indigo-100/50 shadow-sm"
+              className="w-full flex items-center justify-center gap-3 py-3 mb-2 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-slate-800 dark:to-slate-900 hover:from-indigo-600 hover:to-purple-700 dark:hover:from-indigo-600 dark:hover:to-indigo-700 hover:text-white text-indigo-700 dark:text-indigo-300 rounded-xl transition-all font-bold text-sm border border-indigo-100/50 dark:border-slate-800 shadow-sm"
             >
               <CalculatorIcon className="w-5 h-5" />
               {shopSettings.systemLanguage === 'bn' ? 'ক্যালকুলেটর (Calculator)' : 'Open Calculator'}
@@ -5337,7 +5629,7 @@ export default function App() {
                   document.exitFullscreen().catch(() => {});
                 }
               }}
-              className="w-full flex items-center justify-center gap-3 py-3 mb-2 text-indigo-600 hover:text-white hover:bg-indigo-600 rounded-xl transition-all font-bold text-sm border border-indigo-100 hover:border-indigo-600 shadow-sm"
+              className="w-full flex items-center justify-center gap-3 py-3 mb-2 text-indigo-600 dark:text-indigo-400 hover:text-white hover:bg-indigo-600 dark:hover:bg-indigo-600 rounded-xl transition-all font-bold text-sm border border-indigo-100 dark:border-slate-800 hover:border-indigo-600 dark:hover:border-indigo-600 shadow-sm"
             >
               {isFullScreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
               {isFullScreen ? st('fullScreenOff') : st('fullScreenOn')}
@@ -5345,8 +5637,17 @@ export default function App() {
             <motion.button 
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
+              onClick={() => setDarkMode(!darkMode)}
+              className="w-full flex items-center justify-center gap-3 py-3 mb-2 text-indigo-650 dark:text-indigo-400 hover:text-white hover:bg-indigo-600 dark:hover:bg-indigo-600 rounded-xl transition-all font-bold text-sm border border-indigo-100 dark:border-slate-800 hover:border-indigo-600 dark:hover:border-indigo-600 shadow-sm"
+            >
+              {darkMode ? <Sun className="w-5 h-5 text-amber-500 animate-spin-slow" /> : <Moon className="w-5 h-5 text-indigo-400" />}
+              {darkMode ? (shopSettings.systemLanguage === 'bn' ? 'লাইট মোড (Light Mode)' : 'Light Mode') : (shopSettings.systemLanguage === 'bn' ? 'ডার্ক মোড (Dark Mode)' : 'Dark Mode')}
+            </motion.button>
+            <motion.button 
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
               onClick={handleLogout}
-              className="w-full flex items-center justify-center gap-3 py-3 text-red-500 hover:text-white hover:bg-red-500 rounded-xl transition-all font-bold text-sm border border-red-100 hover:border-red-500 shadow-sm"
+              className="w-full flex items-center justify-center gap-3 py-3 text-red-500 hover:text-white hover:bg-red-500 rounded-xl transition-all font-bold text-sm border border-red-100 dark:border-slate-800 hover:border-red-500 shadow-sm"
             >
               <LogOut className="w-5 h-5" />
               {st('logout')}
@@ -5355,7 +5656,7 @@ export default function App() {
         </aside>
 
         {/* Main Content */}
-        <main className={`flex-1 transition-all duration-300 ${(activeTab === 'pos' || activeTab === 'jarvis') ? 'p-0 sm:p-2 lg:p-3' : 'p-4 lg:p-8'} overflow-x-hidden relative bg-white`}>
+        <main className={`flex-1 transition-all duration-300 ${(activeTab === 'pos' || activeTab === 'jarvis') ? 'p-0 sm:p-2 lg:p-3' : 'p-4 lg:p-8'} overflow-x-hidden relative bg-white dark:bg-slate-950`}>
           <AnimatePresence>
             {activeTab !== 'jarvis' && <motion.button 
               initial={{ x: -20, opacity: 0, scale: 0.8 }}
@@ -5363,29 +5664,29 @@ export default function App() {
               whileHover={{ scale: 1.05, x: 4 }}
               whileTap={{ scale: 0.95 }}
               onClick={() => setIsSidebarOpen(true)}
-              className={`lg:hidden fixed ${isRtl ? 'right-6' : 'left-6'} top-6 z-[60] p-3 bg-white border border-gray-200 rounded-2xl text-indigo-600 shadow-xl shadow-indigo-100 hover:bg-indigo-50 transition-all group flex items-center gap-2`}
+              className={`lg:hidden fixed ${isRtl ? 'right-6' : 'left-6'} top-6 z-[60] p-3 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl text-indigo-600 dark:text-indigo-400 shadow-xl shadow-indigo-100 dark:shadow-none hover:bg-indigo-50 dark:hover:bg-indigo-950/20 transition-all group flex items-center gap-2`}
             >
               <Menu className="w-6 h-6" />
             </motion.button>}
           </AnimatePresence>
 
           {activeTab !== 'jarvis' && (
-            <div className="mb-6 mt-12 lg:mt-0 flex flex-col md:flex-row md:items-center md:justify-between gap-4 p-4 md:p-6 bg-gradient-to-r from-gray-50 to-indigo-50/10 rounded-3xl border border-gray-100 shadow-sm">
+            <div className="mb-6 mt-12 lg:mt-0 flex flex-col md:flex-row md:items-center md:justify-between gap-4 p-4 md:p-6 bg-gradient-to-r from-gray-50 to-indigo-50/10 dark:from-slate-900/60 dark:to-slate-950 border border-gray-100 dark:border-slate-850 shadow-sm">
               <div className="flex items-center gap-3">
-                <div className="p-3 bg-indigo-600/10 text-indigo-600 rounded-2xl">
+                <div className="p-3 bg-indigo-600/10 dark:bg-indigo-400/10 text-indigo-600 dark:text-indigo-450 rounded-2xl">
                   <LayoutDashboard className="w-6 h-6" />
                 </div>
                 <div>
-                  <h2 className="text-[10px] font-black text-gray-400 uppercase tracking-widest leading-none mb-1">
+                  <h2 className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest leading-none mb-1">
                     {systemLang === 'bn' ? 'সিস্টেম স্ট্যাটাস' : systemLang === 'ar' ? 'حالة النظام' : 'System Status'}
                   </h2>
-                  <p className="text-xl font-black text-gray-900 tracking-tight">
+                  <p className="text-xl font-black text-gray-900 dark:text-white tracking-tight">
                     {dynamicSettings.name || (systemLang === 'bn' ? 'আমার শপ' : systemLang === 'ar' ? 'متجري' : 'My Business')}
                   </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <div className="flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 rounded-2xl text-xs font-black tracking-wide border border-emerald-200/60 shadow-sm shadow-emerald-50/20 hover:bg-emerald-100/30 transition-all">
+                <div className="flex items-center gap-2 px-4 py-2 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-450 rounded-2xl text-xs font-black tracking-wide border border-emerald-200/60 dark:border-emerald-900/30 shadow-sm shadow-emerald-50/20 hover:bg-emerald-100/30 transition-all">
                   <div className="relative flex h-2.5 w-2.5 items-center justify-center">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
@@ -12282,14 +12583,20 @@ Return the result as JSON with a "category" field containing exactly one string 
                             <motion.button 
                               whileHover={{ scale: 1.1, backgroundColor: "#fee2e2" }}
                               whileTap={{ scale: 0.95 }}
-                              onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(p.id); }}
+                              onClick={(e) => { 
+                                e.stopPropagation(); 
+                                if (confirmDeleteId === p.id) {
+                                  handleDelete(p.id);
+                                  setConfirmDeleteId(null);
+                                } else {
+                                  setConfirmDeleteId(p.id); 
+                                }
+                              }}
                               className={`p-3 rounded-2xl transition-all shadow-sm relative ${confirmDeleteId === p.id ? 'bg-red-600 text-white shadow-red-200' : 'bg-red-50 text-red-500 hover:shadow-red-50'}`}
-                              title="Delete Product"
+                              title={confirmDeleteId === p.id ? "Click again to confirm delete" : "Delete Product"}
                             >
                               {confirmDeleteId === p.id ? (
-                                <div className="flex items-center gap-1">
-                                  <Trash2 className="w-5 h-5" onClick={(e) => { e.stopPropagation(); handleDelete(p.id); }} />
-                                </div>
+                                <span className="text-[10px] font-bold px-1 animate-pulse">Confirm?</span>
                               ) : (
                                 <Trash2 className="w-5 h-5" />
                               )}

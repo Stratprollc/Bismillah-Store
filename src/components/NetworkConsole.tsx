@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Globe, 
@@ -21,7 +22,7 @@ import {
   Box,
   Trash2
 } from 'lucide-react';
-import { db, collection, getDocs, onSnapshot, query, orderBy, deleteDoc, doc, handleFirestoreError, OperationType } from '../firebase';
+import { db, collection, getDocs, onSnapshot, query, orderBy, deleteDoc, updateDoc, doc, handleFirestoreError, OperationType, deleteShopAllData } from '../firebase';
 
 interface Merchant {
   id: string;
@@ -34,6 +35,7 @@ interface Merchant {
   address?: string;
   phone?: string;
   type?: string;
+  status?: 'active' | 'blocked';
 }
 
 export const NetworkConsole: React.FC = () => {
@@ -42,6 +44,9 @@ export const NetworkConsole: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMerchant, setSelectedMerchant] = useState<Merchant | null>(null);
   const [expandedMerchantId, setExpandedMerchantId] = useState<string | null>(null);
+  const [confirmingBlock, setConfirmingBlock] = useState<Merchant | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState<Merchant | null>(null);
+  const [statusNotification, setStatusNotification] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
     // In a real multi-tenant app, this would query a global 'merchants' collection
@@ -60,7 +65,8 @@ export const NetworkConsole: React.FC = () => {
           shopCode: data.shopCode,
           address: data.address,
           phone: data.phone,
-          type: data.type
+          type: data.type,
+          status: data.status || 'active'
         });
       });
       setMerchants(list);
@@ -79,14 +85,42 @@ export const NetworkConsole: React.FC = () => {
     m.shopCode?.includes(searchTerm)
   );
 
-  const handleDeleteMerchant = async (merchant: Merchant) => {
-    if (window.confirm(`Are you sure you want to permanently delete ${merchant.shopName}?`)) {
-      try {
-        await deleteDoc(doc(db, "shops", merchant.id));
-        setSelectedMerchant(null);
-      } catch (error) {
-        handleFirestoreError(error, OperationType.DELETE, 'shops');
-      }
+  const executeDeleteMerchant = async (merchant: Merchant) => {
+    try {
+      await deleteShopAllData(merchant.id);
+      setSelectedMerchant(null);
+      setConfirmingDelete(null);
+      setStatusNotification({
+        type: 'success',
+        text: 'Merchant and all associated store data have been successfully deleted from the database.'
+      });
+    } catch (error) {
+      const errMsg = handleFirestoreError(error, OperationType.DELETE, 'shops');
+      setStatusNotification({
+        type: 'error',
+        text: typeof errMsg === 'string' ? errMsg : 'Failed to delete merchant. Please verify your admin credentials.'
+      });
+    }
+  };
+
+  const executeToggleBlockMerchant = async (merchant: Merchant) => {
+    const isBlocked = merchant.status === 'blocked';
+    try {
+      await updateDoc(doc(db, "shops", merchant.id), {
+        status: isBlocked ? 'active' : 'blocked'
+      });
+      setSelectedMerchant(prev => prev && prev.id === merchant.id ? { ...prev, status: isBlocked ? 'active' : 'blocked' } : prev);
+      setConfirmingBlock(null);
+      setStatusNotification({
+        type: 'success',
+        text: `Merchant successfully ${isBlocked ? 'unblocked' : 'blocked'}.`
+      });
+    } catch (error) {
+      const errMsg = handleFirestoreError(error, OperationType.UPDATE, 'shops');
+      setStatusNotification({
+        type: 'error',
+        text: typeof errMsg === 'string' ? errMsg : 'Failed to update merchant status.'
+      });
     }
   };
 
@@ -219,11 +253,17 @@ export const NetworkConsole: React.FC = () => {
                           </div>
                         </td>
                         <td className="px-6 py-5">
-                          <div className="flex items-center justify-center">
+                          <div className="flex flex-col items-center justify-center gap-1.5">
                             <span className="px-3 py-1 bg-emerald-50 text-emerald-600 text-[11px] font-black uppercase tracking-widest rounded-xl border border-emerald-100 flex items-center gap-1.5">
                               <ShieldCheck className="w-3.5 h-3.5" />
                               {merchant.plan}
                             </span>
+                            {merchant.status === 'blocked' && (
+                              <span className="px-2.5 py-0.5 bg-rose-50 text-rose-600 text-[9px] font-bold uppercase tracking-wider rounded-lg border border-rose-100 flex items-center gap-1">
+                                <ShieldAlert className="w-3 h-3" />
+                                Blocked
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td className="px-8 py-5 text-right flex items-center justify-end gap-2">
@@ -322,10 +362,17 @@ export const NetworkConsole: React.FC = () => {
                   </div>
                   <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100">
                     <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Status & Plan</div>
-                    <div className="font-black text-emerald-600 flex items-center gap-1.5">
-                      <ShieldCheck className="w-5 h-5" />
-                      Active {selectedMerchant.plan}
-                    </div>
+                    {selectedMerchant.status === 'blocked' ? (
+                      <div className="font-black text-rose-600 flex items-center gap-1.5">
+                        <ShieldAlert className="w-5 h-5 animate-pulse" />
+                        Blocked (Disabled)
+                      </div>
+                    ) : (
+                      <div className="font-black text-emerald-600 flex items-center gap-1.5">
+                        <ShieldCheck className="w-5 h-5" />
+                        Active {selectedMerchant.plan}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -359,22 +406,42 @@ export const NetworkConsole: React.FC = () => {
                   </div>
                 </div>
               </div>
-              <div className="p-6 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+              <div className="p-6 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="text-xs font-medium text-slate-400 flex items-center gap-1.5">
                   <Clock className="w-3.5 h-3.5" />
                   Joined {new Date(selectedMerchant.createdAt).toLocaleString()}
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <button 
-                    onClick={() => handleDeleteMerchant(selectedMerchant)}
-                    className="px-6 py-2.5 bg-rose-50 text-rose-600 font-bold rounded-xl shadow-sm hover:bg-rose-100 transition-colors flex items-center gap-2 border border-rose-100"
+                    onClick={() => setConfirmingBlock(selectedMerchant)}
+                    className={`px-4 py-2 font-bold text-sm rounded-xl shadow-sm transition-all focus:ring-2 focus:ring-offset-2 flex items-center gap-2 border ${
+                      selectedMerchant.status === 'blocked' 
+                        ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border-emerald-100 focus:ring-emerald-500' 
+                        : 'bg-amber-50 text-amber-600 hover:bg-amber-100 border-amber-100 focus:ring-amber-500'
+                    }`}
+                  >
+                    {selectedMerchant.status === 'blocked' ? (
+                      <>
+                        <ShieldCheck className="w-4 h-4" />
+                        Unblock Merchant
+                      </>
+                    ) : (
+                      <>
+                        <ShieldAlert className="w-4 h-4" />
+                        Block Merchant
+                      </>
+                    )}
+                  </button>
+                  <button 
+                    onClick={() => setConfirmingDelete(selectedMerchant)}
+                    className="px-4 py-2 bg-rose-50 text-rose-600 font-bold text-sm rounded-xl shadow-sm hover:bg-rose-100 transition-all focus:ring-2 focus:ring-rose-500 focus:ring-offset-2 flex items-center gap-2 border border-rose-100"
                   >
                     <Trash2 className="w-4 h-4" />
                     Delete
                   </button>
                   <button 
                     onClick={() => setSelectedMerchant(null)}
-                    className="px-6 py-2.5 bg-slate-800 text-white font-bold rounded-xl shadow-lg hover:bg-slate-900 transition-colors"
+                    className="px-4 py-2 bg-slate-800 text-white font-bold text-sm rounded-xl shadow-lg hover:bg-slate-900 transition-all focus:ring-2 focus:ring-slate-500 focus:ring-offset-2"
                   >
                     Close Details
                   </button>
@@ -384,6 +451,142 @@ export const NetworkConsole: React.FC = () => {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {createPortal(
+        <AnimatePresence>
+          {/* Custom Confirmation Modal for Blocking */}
+          {confirmingBlock && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+            >
+              <motion.div 
+                initial={{ scale: 0.95, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.95, opacity: 0, y: 20 }}
+                className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl border border-slate-100"
+              >
+                <div className="flex items-center gap-3 text-amber-600 mb-4">
+                  <ShieldAlert className="w-8 h-8" />
+                  <h2 className="text-xl font-black text-slate-800">
+                    {confirmingBlock.status === 'blocked' ? 'Unblock' : 'Block'} Merchant Store?
+                  </h2>
+                </div>
+                <p className="text-slate-600 text-sm font-medium mb-6">
+                  Are you sure you want to {confirmingBlock.status === 'blocked' ? 'unblock (enable)' : 'block (disable)'} <strong className="text-slate-850">{confirmingBlock.shopName}</strong>? 
+                  {confirmingBlock.status === 'blocked' ? (
+                    " This will restore system access for the merchant and their staff instantly."
+                  ) : (
+                    " Blocked merchants and their staff will be immediately logged out and forbidden from logging back in."
+                  )}
+                </p>
+                <div className="flex items-center justify-end gap-3">
+                  <button 
+                    onClick={() => setConfirmingBlock(null)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-650 font-bold text-sm rounded-xl transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={() => executeToggleBlockMerchant(confirmingBlock)}
+                    className={`px-5 py-2 text-white font-bold text-sm rounded-xl transition-all shadow-lg cursor-pointer ${
+                      confirmingBlock.status === 'blocked' 
+                        ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20' 
+                        : 'bg-amber-650 hover:bg-amber-700 shadow-amber-500/20'
+                    }`}
+                  >
+                    Yes, {confirmingBlock.status === 'blocked' ? 'Unblock' : 'Block'}
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+
+          {/* Custom Confirmation Modal for Deleting */}
+          {confirmingDelete && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+            >
+              <motion.div 
+                initial={{ scale: 0.95, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.95, opacity: 0, y: 20 }}
+                className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl border border-slate-150"
+              >
+                <div className="flex items-center gap-3 text-rose-600 mb-4">
+                  <Trash2 className="w-8 h-8" />
+                  <h2 className="text-xl font-black text-slate-800">Delete Merchant Store?</h2>
+                </div>
+                <p className="text-slate-600 text-sm font-medium mb-6">
+                  Are you sure you want to permanently delete <strong className="text-slate-850">{confirmingDelete.shopName}</strong> and ALL their database records? 
+                  <span className="block mt-2 font-black text-rose-600 uppercase text-xs tracking-widest">
+                    ⚠️ This action is completely irreversible!
+                  </span>
+                </p>
+                <div className="flex items-center justify-end gap-3">
+                  <button 
+                    onClick={() => setConfirmingDelete(null)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-650 font-bold text-sm rounded-xl transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={() => executeDeleteMerchant(confirmingDelete)}
+                    className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-sm rounded-xl transition-all shadow-lg shadow-rose-500/20 cursor-pointer"
+                  >
+                    Yes, Permanently Delete
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+
+          {/* Status Notification Modal */}
+          {statusNotification && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+            >
+              <motion.div 
+                initial={{ scale: 0.95, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.95, opacity: 0, y: 20 }}
+                className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl border border-slate-105"
+              >
+                <div className="flex items-center gap-3 mb-4">
+                  {statusNotification.type === 'success' ? (
+                    <ShieldCheck className="w-8 h-8 text-emerald-600" />
+                  ) : (
+                    <ShieldAlert className="w-8 h-8 text-rose-600" />
+                  )}
+                  <h2 className="text-xl font-black text-slate-800">
+                    {statusNotification.type === 'success' ? 'Success' : 'Error'}
+                  </h2>
+                </div>
+                <p className="text-slate-600 text-sm font-medium mb-6">
+                  {statusNotification.text}
+                </p>
+                <div className="flex items-center justify-end">
+                  <button 
+                    onClick={() => setStatusNotification(null)}
+                    className="px-6 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold text-sm rounded-xl transition-all shadow-lg shadow-black/10 cursor-pointer"
+                  >
+                    OK
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
     </div>
   );
 };
