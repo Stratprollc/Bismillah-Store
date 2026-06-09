@@ -18,7 +18,9 @@ import {
   AlertCircle,
   HelpCircle,
   RefreshCw,
-  Plus
+  Plus,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 
 interface MessagingGatewayProps {
@@ -53,6 +55,7 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
   const [zenderEndpointUrl, setZenderEndpointUrl] = useState<string>(settings.zender_endpoint_url || 'https://app.sellerscampus.com/api/v1');
   const [zenderApiKey, setZenderApiKey] = useState<string>(settings.zender_api_key || settings.waToken || '');
   const [zenderDeviceId, setZenderDeviceId] = useState<string>(settings.zender_device_id || settings.zender_whatsapp_device_id || '');
+  const [showApiKey, setShowApiKey] = useState<boolean>(false);
 
   const [isConnectingWa, setIsConnectingWa] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
@@ -671,13 +674,28 @@ export const MessagingGateway: React.FC<MessagingGatewayProps> = ({
 
                             <div>
                               <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">API Secret Key/Token</label>
-                              <input
-                                type="password"
-                                value={zenderApiKey}
-                                onChange={(e) => setZenderApiKey(e.target.value)}
-                                placeholder="Manual Zender token key"
-                                className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-slate-800 text-xs font-semibold focus:ring-2 focus:ring-indigo-500 outline-none bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300"
-                              />
+                              <div className="relative flex items-center w-full">
+                                <input
+                                  type={showApiKey ? "text" : "password"}
+                                  value={zenderApiKey}
+                                  onChange={(e) => setZenderApiKey(e.target.value)}
+                                  placeholder="Manual Zender token key"
+                                  className="w-full pl-3 pr-10 py-2 rounded-xl border border-gray-200 dark:border-slate-800 text-xs font-semibold focus:ring-2 focus:ring-indigo-500 outline-none bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300"
+                                />
+                                <button
+                                  type="button"
+                                  id="toggle-zender-token-visibility"
+                                  onClick={() => setShowApiKey(!showApiKey)}
+                                  className="absolute right-3 p-1 text-gray-400 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors focus:outline-none"
+                                  title={showApiKey ? "Hide Token" : "Show Token"}
+                                >
+                                  {showApiKey ? (
+                                    <EyeOff className="w-4 h-4" />
+                                  ) : (
+                                    <Eye className="w-4 h-4" />
+                                  )}
+                                </button>
+                              </div>
                             </div>
 
                             <div>

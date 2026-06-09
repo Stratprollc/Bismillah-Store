@@ -108,7 +108,7 @@ async function startServer() {
           });
         }
       } catch (err: any) {
-        console.error('Test Handshake link error:', err.message);
+        console.warn('Test Handshake link error:', err.message);
         return res.status(500).json({
           status: 'failed',
           message: `Handshake Connection Error: ${err.message}`
@@ -161,7 +161,7 @@ async function startServer() {
             console.warn('Real Zender API call fell back due to status non-OK', await response.text());
           }
         } catch (apiErr: any) {
-          console.error('Zender API connection exception:', apiErr.message);
+          console.warn('Zender API connection exception:', apiErr.message);
         }
       }
 
@@ -213,7 +213,7 @@ async function startServer() {
           return res.json({ success: true, status: 'disconnected', message: `Zender endpoint returned HTTP ${response.status}` });
         }
       } catch (err: any) {
-        console.error('[Status Sync] Zender API fetch error:', err.message);
+        console.log('[Status Sync] Zender API fetch message (simulated/offline):', err.message);
         return res.json({ success: true, status: 'disconnected', error: err.message });
       }
     } catch (err: any) {
@@ -249,7 +249,7 @@ async function startServer() {
           return res.json({ success: true, status: finalStatus, raw: data });
         }
       } catch (err) {
-        console.error('Error fetching real status from Zender API:', err);
+        console.warn('Error fetching real status from Zender API:', err);
       }
 
       const backupStatus = simulatedSessions.get(device_id) || 'disconnected';
@@ -299,7 +299,7 @@ async function startServer() {
           return res.json({ success: true, message: 'SellersCampus Zender session successfully terminated.' });
         }
       } catch (err: any) {
-        console.error('[Unlink API] Zender connect error:', err.message);
+        console.warn('[Unlink API] Zender connect error:', err.message);
       }
 
       return res.json({ success: true, message: 'Unlinked. Restored sandbox default route.' });
@@ -482,7 +482,7 @@ async function startServer() {
             throw new Error(`Zender dispatch response fail: ${errText}`);
           }
         } catch (waErr: any) {
-          console.error('[Zender WhatsApp Send Exception]', waErr.message);
+          console.warn('[Zender WhatsApp Send Exception]', waErr.message);
           return res.status(500).json({ 
             success: false, 
             error: waErr.message || 'WhatsApp Gateway Send Failure', 
@@ -523,7 +523,7 @@ async function startServer() {
             throw new Error(`Zender SMS device carrier offline: ${errText}`);
           }
         } catch (smsErr: any) {
-          console.error('[Zender SMS Device Carrier Failure]', smsErr.message);
+          console.warn('[Zender SMS Device Carrier Failure]', smsErr.message);
           return res.status(500).json({ 
             success: false, 
             error: smsErr.message || 'SMS Device Carrier Offline', 
