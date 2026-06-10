@@ -12,7 +12,7 @@ export const secondaryAuth = getAuth(secondaryApp);
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
   localCache: memoryLocalCache()
-}, firebaseConfig.firestoreDatabaseId);
+});
 
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
@@ -86,6 +86,7 @@ async function testConnection() {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
+    console.error("Firestore connection test failed:", error);
     if(error instanceof Error && error.message.includes('the client is offline')) {
       console.error("Please check your Firebase configuration. ");
     }
