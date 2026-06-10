@@ -51,6 +51,15 @@ export default defineConfig(({mode}) => {
               if (id.includes('recharts') || id.includes('d3')) {
                 return 'vendor-charts';
               }
+              if (id.includes('lucide-react')) {
+                return 'vendor-lucide';
+              }
+              if (id.includes('motion')) {
+                return 'vendor-motion';
+              }
+              if (id.includes('hls.js')) {
+                return 'vendor-hls';
+              }
             }
           }
         }
