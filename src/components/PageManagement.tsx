@@ -296,11 +296,23 @@ export const PageManagement: React.FC<PageManagementProps> = ({
 
 
   // 4. RELEASE VERSION STATE & DATA
-  const [currentVersion, setCurrentVersion] = useState(localStorage.getItem('pm_version') || 'v4.2.1');
+  const [currentVersion, setCurrentVersion] = useState(localStorage.getItem('pm_version') || 'v4.2.2');
   const [releaseNotes, setReleaseNotes] = useState<ReleaseNote[]>(() => {
     const cached = localStorage.getItem('pm_releases');
     if (cached) return JSON.parse(cached);
     return [
+      {
+        id: 'rel-0',
+        version: 'v4.2.2',
+        date: '2026-06-11',
+        type: 'patch',
+        isPublished: true,
+        changes: [
+          { category: 'new', text: isBn ? 'হোস্টিংগার এবং প্রোডাকশন এনভায়রনমেন্টের জন্য বিল্ড সেটআপ অপ্টিমাইজ করা হয়েছে।' : 'Optimized production build, esbuild bundle configuration, and setup for Hostinger.' },
+          { category: 'fix', text: isBn ? 'ডুপ্লিকেট ইম্পোর্ট ফিক্স এবং টাইপস্ক্রিপ্ট টেমপ্লেট কোড এডিটিং পরিষ্কার করা হয়েছে।' : 'Fixed duplicate imports, reference syntax issues, and cleared linter warnings.' },
+          { category: 'perf', text: isBn ? 'প্রোডাকশন সার্ভার স্টার্টআপ সময় এবং সিডিএন সম্পদ লোডিং ত্বরান্বিত করা হয়েছে।' : 'Accelerated server startup times and asset loading optimization in production.' }
+        ]
+      },
       {
         id: 'rel-1',
         version: 'v4.2.1',

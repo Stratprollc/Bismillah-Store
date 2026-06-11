@@ -1,6 +1,6 @@
 # Hostinger Deployment Guide for ShopMaster POS
 
-Congratulations on your POS system! To make it live on **pos.sellerscampus.com** using Hostinger, follow these steps:
+Congratulations on your POS system! Version v4.2.2 is ready for release. To make it live on **pos.sellerscampus.com** using Hostinger, follow these steps:
 
 ## 1. Prepare your Repository
 1. Push your code to a **GitHub repository** (Private or Public).
