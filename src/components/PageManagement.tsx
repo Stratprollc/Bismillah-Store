@@ -296,11 +296,23 @@ export const PageManagement: React.FC<PageManagementProps> = ({
 
 
   // 4. RELEASE VERSION STATE & DATA
-  const [currentVersion, setCurrentVersion] = useState(localStorage.getItem('pm_version') || 'v4.2.3');
+  const [currentVersion, setCurrentVersion] = useState(localStorage.getItem('pm_version') || 'v4.2.4');
   const [releaseNotes, setReleaseNotes] = useState<ReleaseNote[]>(() => {
     const cached = localStorage.getItem('pm_releases');
     if (cached) return JSON.parse(cached);
     return [
+      {
+        id: 'rel-new-v424',
+        version: 'v4.2.4',
+        date: '2026-06-11',
+        type: 'patch',
+        isPublished: true,
+        changes: [
+          { category: 'new', text: isBn ? 'রিয়েল-টাইম ওয়ার্কস্পেস সিঙ্ক এবং গিট কমিট ইন্টিগ্রেশনের জন্য মেটাডাটা অপ্টিমাইজেশন।' : 'Optimized metadata tracking for real-time workspace syncing and Git commit integration.' },
+          { category: 'fix', text: isBn ? 'নো-চেঞ্জেস টু কমিট ব্লকিং সলভ করা হয়েছে এবং ক্যাশ রিস্টার্ট হ্যান্ডলিং উন্নত করা হয়েছে।' : 'Resolved "no changes to commit" blocking blocks and refined cache-restart resilience.' },
+          { category: 'perf', text: isBn ? 'হোস্টিংগার লাইভ রিলিজ পাইপলাইন ভেলোসিটি ডেভেলপমেন্ট বৃদ্ধি করা হয়েছে।' : 'Accelerated the release pipeline deployment velocity on Hostinger production nodes.' }
+        ]
+      },
       {
         id: 'rel-new-0',
         version: 'v4.2.3',
