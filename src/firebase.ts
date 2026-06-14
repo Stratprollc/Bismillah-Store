@@ -12,10 +12,23 @@ export const secondaryAuth = getAuth(secondaryApp);
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
   localCache: memoryLocalCache()
-}, firebaseConfig.firestoreDatabaseId);
+}, (firebaseConfig as any).firestoreDatabaseId);
 
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
+
+// Add required Google Workspace scopes
+googleProvider.addScope('https://www.googleapis.com/auth/spreadsheets');
+googleProvider.addScope('https://www.googleapis.com/auth/calendar');
+googleProvider.addScope('https://www.googleapis.com/auth/gmail.send');
+googleProvider.addScope('https://www.googleapis.com/auth/drive.file');
+googleProvider.addScope('https://www.googleapis.com/auth/meetings.space.created');
+
+let cachedAccessToken: string | null = null;
+export const getCachedAccessToken = () => cachedAccessToken;
+export const setCachedAccessToken = (token: string | null) => {
+  cachedAccessToken = token;
+};
 
 // Error handling helper
 export enum OperationType {
@@ -86,9 +99,11 @@ async function testConnection() {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
-    console.error("Firestore connection test failed:", error);
-    if(error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration. ");
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.warn("Firestore connection test info: client is offline (expected during server build/CI sandbox tests).");
+      console.warn("Please check your Firebase configuration if this message persists in active browser usage.");
+    } else {
+      console.error("Firestore connection test failed:", error);
     }
   }
 }
@@ -144,5 +159,6 @@ export const deleteShopAllData = async (shopId: string) => {
 export { 
   collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, 
   query, where, orderBy, limit, onSnapshot, signInWithPopup, signOut, onAuthStateChanged,
-  signInWithEmailAndPassword, createUserWithEmailAndPassword, signInAnonymously, increment, serverTimestamp, writeBatch
+  signInWithEmailAndPassword, createUserWithEmailAndPassword, signInAnonymously, increment, serverTimestamp, writeBatch,
+  GoogleAuthProvider
 };

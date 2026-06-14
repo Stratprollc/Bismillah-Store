@@ -31,9 +31,10 @@ import ReactBarcode from 'react-barcode';
 interface CustomerPortalProps {
   onBack: () => void;
   lang: 'en' | 'bn' | 'ar';
+  platformBranding?: { logoBase64: string | null };
 }
 
-export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
+export function CustomerPortal({ onBack, lang, platformBranding }: CustomerPortalProps) {
   const isBn = lang === 'bn';
 
   const toBengaliNumber = (num: number | string | undefined | null): string => {
@@ -88,6 +89,10 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
   // Cart configuration
   const [cart, setCart] = useState<{ product: any; quantity: number }[]>([]);
   const [orderNotes, setOrderNotes] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<'cod' | 'bkash'>('cod');
+  const [bKashSender, setBKashSender] = useState('');
+  const [bKashTxnId, setBKashTxnId] = useState('');
+  const [bKashScreenshot, setBKashScreenshot] = useState<string>('');
   const [placingOrder, setPlacingOrder] = useState(false);
   const [orderSuccessId, setOrderSuccessId] = useState<string | null>(null);
 
@@ -107,6 +112,25 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
         const querySnapshot = await getDocs(collection(db, 'shops'));
         const shopList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setShops(shopList);
+        
+        // Auto-select shop from URL if present
+        const path = window.location.pathname;
+        const match = path.match(/^\/merchant\/(.+)$/i);
+        if (match && match[1]) {
+           const codeFromUrl = match[1].trim().toLowerCase().replace(/^shp-/, '').replace(/[^0-9]/g, '');
+           const foundShop = (shopList as any[]).find((s: any) => {
+              const dbShopCode = (s.shopCode || '').toString().trim().toLowerCase().replace(/^shp-/, '').replace(/[^0-9]/g, '');
+              const dbId = (s.id || '').toString().trim().toLowerCase().replace(/^shp-/, '').replace(/[^0-9]/g, '');
+              const dbShopId = (s.shopId || '').toString().trim().toLowerCase().replace(/^shp-/, '').replace(/[^0-9]/g, '');
+              return dbShopCode === codeFromUrl || dbId === codeFromUrl || dbShopId === codeFromUrl || (s.shopCode || '').toString().trim().toLowerCase() === match[1].trim().toLowerCase() || (s.id || '').toString().trim().toLowerCase() === match[1].trim().toLowerCase();
+           });
+           if (foundShop) {
+              setSelectedShop(foundShop);
+              setStage('customer_login');
+           } else {
+              setSearchShopQuery(match[1].trim());
+           }
+        }
       } catch (err) {
         console.error("Error fetching shops for customer:", err);
       }
@@ -138,6 +162,15 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
     };
   }, [selectedShop]);
 
+  // Synchronize browser tab title based on selected merchant context
+  useEffect(() => {
+    if (selectedShop && stage !== 'shop_selection') {
+      document.title = selectedShop.name || "SHP MASTER";
+    } else {
+      document.title = "SHP MASTER";
+    }
+  }, [selectedShop, stage]);
+
   // Sync historical orders for this phone of this shop
   useEffect(() => {
     if (!selectedShop || !currentCustomer) return;
@@ -161,6 +194,28 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
     setSelectedShop(shop);
     setStage('customer_login');
   };
+
+  // Auto-select shop if exact match is entered or scanned
+  useEffect(() => {
+    if (stage === 'shop_select' && searchShopQuery.trim().length >= 4) {
+      const queryRaw = searchShopQuery.trim().toLowerCase();
+      const numericQuery = queryRaw.replace(/^shp-/, '').replace(/[^0-9]/g, '');
+      const exactMatch = shops.find((s: any) => {
+        const dbShopCode = (s.shopCode || '').toString().trim().toLowerCase().replace(/^shp-/, '').replace(/[^0-9]/g, '');
+        const dbId = (s.id || '').toString().trim().toLowerCase().replace(/^shp-/, '').replace(/[^0-9]/g, '');
+        const dbShopId = (s.shopId || '').toString().trim().toLowerCase().replace(/^shp-/, '').replace(/[^0-9]/g, '');
+        
+        const isExactCode = dbShopCode === numericQuery || dbId === numericQuery || dbShopId === numericQuery;
+        const isExactDirect = (s.shopCode || '').toString().trim().toLowerCase() === queryRaw || (s.id || '').toString().trim().toLowerCase() === queryRaw;
+        
+        return isExactCode || isExactDirect;
+      });
+      if (exactMatch) {
+        setSelectedShop(exactMatch);
+        setStage('customer_login');
+      }
+    }
+  }, [searchShopQuery, shops, stage]);
 
   const handleCustomerLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -250,10 +305,21 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
     setCart(prev => prev.filter(item => item.product.id !== productId));
   };
 
-  const cartTotal = cart.reduce((tot, item) => tot + ((Number(item.product.price) || 0) * item.quantity), 0);
+  const cartSubtotal = cart.reduce((tot, item) => tot + ((Number(item.product.price) || 0) * item.quantity), 0);
+  
+  const bKashType = selectedShop?.paymentConfig?.bKashType || 'none';
+  const paymentCharge = (paymentMethod === 'bkash' && (bKashType === 'merchant' || bKashType === 'personal')) 
+    ? Math.round(cartSubtotal * 0.018) 
+    : 0;
+  const cartTotal = cartSubtotal + paymentCharge;
 
   const handlePlaceOrder = async () => {
     if (cart.length === 0 || !currentCustomer || !selectedShop) return;
+    if (paymentMethod === 'bkash' && (!bKashSender || !bKashTxnId)) {
+      alert(isBn ? "বিকাশ নম্বর এবং ট্রানজ্যাকশন আইডি প্রদান করুন" : "Please provide bKash number and Transaction ID.");
+      return;
+    }
+
     setPlacingOrder(true);
     try {
       const orderData = {
@@ -270,6 +336,15 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
           imageUrl: item.product.imageUrl || ''
         })),
         totalAmount: cartTotal,
+        subtotal: cartSubtotal,
+        paymentCharge: paymentCharge,
+        paymentMethod: paymentMethod,
+        paymentStatus: paymentMethod === 'bkash' ? 'verifying' : 'unpaid',
+        paymentDetails: paymentMethod === 'bkash' ? {
+          sender: bKashSender,
+          txnId: bKashTxnId,
+          screenshot: bKashScreenshot
+        } : null,
         status: 'pending', // pending, approved, cancelled
         notes: orderNotes.trim(),
         timestamp: new Date().toISOString(),
@@ -277,9 +352,27 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
       };
 
       await addDoc(collection(db, 'customer_orders'), orderData);
+      
+      // Also save notification for merchant
+      if (paymentMethod === 'bkash') {
+        await addDoc(collection(db, 'notifications'), {
+          shopId: selectedShop.id,
+          title: 'bKash Payment Verification Needed',
+          message: `Customer ${currentCustomer.name} sent ${cartTotal} Tk via bKash. Txn ID: ${bKashTxnId}, From: ${bKashSender}`,
+          type: 'payment',
+          timestamp: new Date().toISOString(),
+          read: false,
+          actionId: orderData.orderNumber
+        });
+      }
+
       setOrderSuccessId(orderData.orderNumber);
       setCart([]);
       setOrderNotes('');
+      setPaymentMethod('cod');
+      setBKashSender('');
+      setBKashTxnId('');
+      setBKashScreenshot('');
       setActiveTab('orders'); // Jump to histories
     } catch (err) {
       console.error(err);
@@ -402,14 +495,42 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
   });
 
   const filteredShops = shops.filter(s => {
-    const q = searchShopQuery.trim().toLowerCase();
-    if (q.length < 6) return false;
+    const queryRaw = searchShopQuery.trim().toLowerCase();
+    const numericQuery = queryRaw.replace(/^shp-/, '').replace(/[^0-9]/g, '');
+    if (queryRaw.length < 3) return false;
 
-    const codeMatch = s.shopCode?.toString().trim().toLowerCase() === q;
-    const idMatch = s.id?.toString().trim().toLowerCase() === q;
-    const shopIdMatch = s.shopId?.toString().trim().toLowerCase() === q;
+    const dbShopCode = (s.shopCode || '').toString().trim().toLowerCase().replace(/^shp-/, '').replace(/[^0-9]/g, '');
+    const dbId = (s.id || '').toString().trim().toLowerCase().replace(/^shp-/, '').replace(/[^0-9]/g, '');
+    const dbShopId = (s.shopId || '').toString().trim().toLowerCase().replace(/^shp-/, '').replace(/[^0-9]/g, '');
+    const dbName = (s.name || '').toString().trim().toLowerCase();
+    
+    // Check if searching with numeric queries
+    const hasDigits = /[0-9]/.test(queryRaw);
+    
+    let codeMatch = false;
+    let idMatch = false;
+    let shopIdMatch = false;
+    let phoneMatch = false;
+    let waMatch = false;
 
-    return codeMatch || idMatch || shopIdMatch;
+    if (hasDigits && numericQuery) {
+      codeMatch = dbShopCode === numericQuery || dbShopCode.includes(numericQuery);
+      idMatch = dbId === numericQuery || dbId.includes(numericQuery);
+      shopIdMatch = dbShopId === numericQuery || dbShopId.includes(numericQuery);
+      
+      const phoneClean = (s.phone || '').toString().trim().replace(/[^0-9]/g, '');
+      const waClean = (s.whatsapp || '').toString().trim().replace(/[^0-9]/g, '');
+      phoneMatch = phoneClean.includes(numericQuery);
+      waMatch = waClean.includes(numericQuery);
+    }
+    
+    const directCodeMatch = (s.shopCode || '').toString().trim().toLowerCase() === queryRaw || (s.shopCode || '').toString().trim().toLowerCase().replace(/^shp-/, '') === queryRaw;
+    const directIdMatch = (s.id || '').toString().trim().toLowerCase() === queryRaw;
+    const directShopIdMatch = (s.shopId || '').toString().trim().toLowerCase() === queryRaw;
+
+    const nameMatch = dbName.includes(queryRaw);
+
+    return codeMatch || idMatch || shopIdMatch || phoneMatch || waMatch || nameMatch || directCodeMatch || directIdMatch || directShopIdMatch;
   });
 
   return (
@@ -436,17 +557,48 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
             <ArrowLeft className="w-5 h-5" />
           </motion.button>
           
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest bg-indigo-50 px-2 py-0.5 rounded-md flex items-center gap-1">
-                <span className="w-1 h-1 bg-indigo-500 rounded-full animate-ping" />
-                <span>{isBn ? "গ্রাহক সেবা পোর্টাল" : "Customer Portal"}</span>
-              </span>
+          {selectedShop && stage !== 'shop_selection' ? (
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-white border border-gray-150 rounded-xl overflow-hidden flex items-center justify-center shrink-0 shadow-xs">
+                {selectedShop.logoUrl || selectedShop.logo || selectedShop.logoBase64 ? (
+                  <img 
+                    src={selectedShop.logoUrl || selectedShop.logo || selectedShop.logoBase64} 
+                    alt={selectedShop.name} 
+                    className="w-full h-full object-contain p-0.5" 
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                      if (e.currentTarget.nextElementSibling) {
+                        (e.currentTarget.nextElementSibling as HTMLElement).style.display = 'flex';
+                      }
+                    }}
+                  />
+                ) : null}
+                <div className="w-full h-full items-center justify-center bg-indigo-50" style={{ display: (selectedShop.logoUrl || selectedShop.logo || selectedShop.logoBase64) ? 'none' : 'flex' }}>
+                  <Building2 className="w-5 h-5 text-indigo-600" />
+                </div>
+              </div>
+              <div>
+                <span className="text-[9px] font-black text-indigo-600 uppercase tracking-widest bg-indigo-50/80 px-1.5 py-0.5 rounded-sm">
+                  {selectedShop.shopCode ? `${selectedShop.shopCode.toString().replace(/^SHP-/i, '').replace(/[^0-9]/g, '')}` : 'MERCHANT'}
+                </span>
+                <h1 className="text-base md:text-lg font-black text-gray-900 tracking-tight leading-none mt-1">
+                  {selectedShop.name}
+                </h1>
+              </div>
             </div>
-            <h1 className="text-lg md:text-xl font-bold text-gray-900 mt-0.5 tracking-tight leading-none">
-              {stage === 'dashboard' && selectedShop ? selectedShop.name : (isBn ? "আমাদের সেবা সমূহ" : "Access Corporate Service")}
-            </h1>
-          </div>
+          ) : (
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest bg-indigo-50 px-2 py-0.5 rounded-md flex items-center gap-1">
+                  <span className="w-1 h-1 bg-indigo-500 rounded-full animate-ping" />
+                  <span>{isBn ? "গ্রাহক সেবা পোর্টাল" : "Customer Portal"}</span>
+                </span>
+              </div>
+              <h1 className="text-lg md:text-xl font-bold text-gray-900 mt-0.5 tracking-tight leading-none">
+                {isBn ? "আমাদের সেবা সমূহ" : "Access Corporate Service"}
+              </h1>
+            </div>
+          )}
         </div>
 
         {/* Selected store badge */}
@@ -454,7 +606,7 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
           <motion.div 
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50/70 rounded-xl text-xs font-bold text-indigo-600 border border-indigo-100/40"
+            className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50/70 rounded-xl text-xs font-bold text-indigo-600 border border-indigo-100/40 shrink-0"
           >
             <Building2 className="w-3.5 h-3.5 text-indigo-500" />
             <span className="max-w-[100px] md:max-w-none truncate">{selectedShop.name}</span>
@@ -490,8 +642,13 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
               className="max-w-xl mx-auto w-full py-8 md:py-12 flex flex-col"
             >
             <div className="text-center mb-10">
-              <div className="w-16 h-16 bg-indigo-500 rounded-3xl flex items-center justify-center mx-auto shadow-lg shadow-indigo-100 mb-6">
-                <Globe className="w-8 h-8 text-white" />
+              <div className="w-28 h-28 flex items-center justify-center mx-auto mb-4 overflow-hidden rounded-3xl">
+                {platformBranding?.logoBase64 ? (
+                  <img src={platformBranding.logoBase64} alt="Platform Logo" className="w-full h-full object-contain" />
+                ) : (
+                  <img src="/LOGO.JPG" alt="Brand Logo" className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display='none'; if(e.currentTarget.nextElementSibling) (e.currentTarget.nextElementSibling as HTMLElement).style.display='block'; }} />
+                )}
+                {(!platformBranding?.logoBase64) && <Globe className="w-12 h-12 text-indigo-500 hidden" />}
               </div>
               <h2 className="text-3xl font-black text-gray-900 tracking-tight leading-none">
                 {isBn ? "দোকান নির্বাচন করুন" : "Choose Your Store"}
@@ -511,8 +668,7 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-indigo-500/80 w-5 h-5 animate-pulse" />
               <input 
                 type="text"
-                maxLength={6}
-                placeholder={isBn ? "৬ ডিজিটের শপ কোড লিখুন (যেমন: ১২৩৪৫৬)..." : "Enter 6-digit shop code (e.g. 123456)..."}
+                placeholder={isBn ? "শপ কোড বা আইডি লিখুন (যেমন: ১২৩৪৫৬)..." : "Enter shop code or ID..."}
                 className="w-full pl-12 pr-4 py-4 rounded-2xl bg-white border border-gray-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 outline-none text-gray-950 font-black text-sm tracking-widest text-center shadow-xs transition-all duration-300"
                 value={searchShopQuery}
                 onChange={(e) => setSearchShopQuery(e.target.value)}
@@ -525,16 +681,16 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
                 <div className="p-10 text-center bg-white border border-gray-100 rounded-3xl shadow-sm text-gray-400 font-semibold space-y-3 flex flex-col items-center animate-fade-in">
                   <Hash className="w-8 h-8 text-indigo-400 animate-pulse" />
                   <span className="text-sm">
-                    {isBn ? "অগ্রসর হতে দয়া করে ৬ ডিজিটের শপ কোডটি ইনপুট করুন।" : "Please enter the 6-digit shop code to view the merchant."}
+                    {isBn ? "অগ্রসর হতে দয়া করে ৪ বা ৬ ডিজিটের শপ কোডটি ইনপুট করুন।" : "Please enter the 4 to 6 digit shop code to load the merchant."}
                   </span>
                 </div>
-              ) : searchShopQuery.trim().length < 6 ? (
+              ) : searchShopQuery.trim().length < 4 ? (
                 <div className="p-10 text-center bg-white border border-gray-100 rounded-3xl shadow-sm text-amber-500 font-semibold space-y-3 flex flex-col items-center animate-fade-in">
                   <div className="px-3 py-1 bg-amber-50 rounded-full text-xs font-black text-amber-600 font-mono animate-pulse">
-                    {searchShopQuery.trim().length} / 6
+                    {searchShopQuery.trim().length} / 4
                   </div>
                   <span className="text-sm">
-                    {isBn ? "শপ কোড অবশ্যই ৬ ডিজিটের হতে হবে।" : "Shop code must be exactly 6 digits long."}
+                    {isBn ? "শপ কোড অবশ্যই কমপক্ষে ৪ ডিজিটের হতে হবে।" : "Shop code must be at least 4 digits long."}
                   </span>
                 </div>
               ) : filteredShops.length === 0 ? (
@@ -564,7 +720,7 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
                           <h3 className="font-bold text-gray-900 group-hover:text-indigo-600 transition-colors text-base">{shop.name}</h3>
                           {shop.shopCode && (
                             <span className="bg-gray-100 text-gray-600 text-xs font-mono font-black px-2 py-0.5 rounded-full border border-gray-200">
-                              #{shop.shopCode}
+                              #{shop.shopCode.toString().replace(/^SHP-/i, '').replace(/[^0-9]/g, '')}
                             </span>
                           )}
                         </div>
@@ -596,16 +752,32 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
               <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-50 rounded-full blur-2xl -mr-10 -mt-10" />
               
               <div className="relative z-10">
-                <div className="w-12 h-12 bg-indigo-100 rounded-2xl flex items-center justify-center mb-6 text-indigo-600">
-                  <User className="w-6 h-6" />
+                <div className="flex items-center gap-4 mb-6 pb-4 border-b border-gray-100">
+                  <div className="w-14 h-14 bg-indigo-50 border border-indigo-100 rounded-2xl overflow-hidden flex items-center justify-center shrink-0 shadow-inner">
+                    {selectedShop?.logoUrl || selectedShop?.logo || selectedShop?.logoBase64 ? (
+                      <img 
+                        src={selectedShop.logoUrl || selectedShop.logo || selectedShop.logoBase64} 
+                        alt={selectedShop.name} 
+                        className="w-full h-full object-contain p-0.5" 
+                      />
+                    ) : (
+                      <Building2 className="w-6 h-6 text-indigo-600" />
+                    )}
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-gray-950 leading-tight tracking-tight">{selectedShop?.name}</h3>
+                    <p className="text-[10px] text-gray-400 font-bold tracking-wider uppercase mt-1">
+                      {selectedShop?.shopCode ? `CODE: ${selectedShop.shopCode.toString().replace(/^SHP-/i, '').replace(/[^0-9]/g, '')}` : 'MERCHANT PARTNER'}
+                    </p>
+                  </div>
                 </div>
 
                 {!isNewCustomer ? (
                   <>
-                    <h2 className="text-2xl font-black text-gray-950 tracking-tight leading-none mb-2">
+                    <h2 className="text-lg font-black text-gray-950 tracking-tight leading-none mb-1 text-center">
                       {isBn ? "কাস্টমার লগইন" : "Identify Yourself"}
                     </h2>
-                    <p className="text-gray-500 text-sm font-medium mb-6">
+                    <p className="text-gray-500 text-xs font-medium mb-6 text-center">
                       {isBn ? "মোবাইল নম্বর দিয়ে আপনার পূর্বের খতিয়ান ও নতুন অর্ডার করুন।" : "Enter your mobile phone number to find your record or submit new orders."}
                     </p>
 
@@ -643,10 +815,10 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
                   </>
                 ) : (
                   <>
-                    <h2 className="text-2xl font-black text-gray-950 tracking-tight leading-none mb-2">
+                    <h2 className="text-lg font-black text-gray-950 tracking-tight leading-none mb-1 text-center">
                       {isBn ? "নতুন অ্যাকাউন্ট তৈরি" : "Register Profile"}
                     </h2>
-                    <p className="text-gray-500 text-sm font-medium mb-6">
+                    <p className="text-gray-500 text-xs font-medium mb-6 text-center leading-relaxed">
                       {isBn 
                         ? `এই নম্বর (${phone}) দিয়ে কোনো কাস্টমার খতিয়ান খুঁজে পাওয়া যায়নি। এক ক্লিকে নতুন রেজিস্ট্রেশন করুন!` 
                         : "No profile found for this mobile. Quick register as a customer of this business."}
@@ -995,14 +1167,104 @@ export function CustomerPortal({ onBack, lang }: CustomerPortalProps) {
                           </div>
                           <div className="border-t border-dashed border-gray-200 mt-2.5 pt-2.5 flex justify-between items-center font-black text-gray-500 font-sans">
                             <span>{isBn ? "কার্ট সাবটোটাল" : "Subtotal Value"}</span>
-                            <span>{formatVal(cartTotal)}{currencySuffix}</span>
+                            <span>{formatVal(cartSubtotal)}{currencySuffix}</span>
                           </div>
                         </div>
 
+                        {/* Payment Selection */}
+                        <div className="space-y-3">
+                          <label className="text-xs font-black uppercase text-gray-500 tracking-wider">
+                            {isBn ? "পেমেন্ট পদ্ধতি" : "Payment Method"}
+                          </label>
+                          <div className="grid grid-cols-2 gap-3">
+                            <button
+                              onClick={() => setPaymentMethod('cod')}
+                              className={`p-3 rounded-xl border text-center transition-all ${paymentMethod === 'cod' ? 'border-indigo-600 bg-indigo-50 ring-2 ring-indigo-600/20' : 'border-gray-200 hover:bg-gray-50'}`}
+                            >
+                              <span className={`text-sm font-black ${paymentMethod === 'cod' ? 'text-indigo-600' : 'text-gray-700'}`}>
+                                {isBn ? "ক্যাশ অন ডেলিভারি" : "Cash on Delivery"}
+                              </span>
+                            </button>
+
+                            {selectedShop?.paymentConfig?.isEnabled && (
+                              <button
+                                onClick={() => setPaymentMethod('bkash')}
+                                className={`p-3 rounded-xl border text-center transition-all ${paymentMethod === 'bkash' ? 'border-pink-500 bg-pink-50 ring-2 ring-pink-500/20' : 'border-gray-200 hover:bg-gray-50'}`}
+                              >
+                                <span className={`text-sm font-black ${paymentMethod === 'bkash' ? 'text-pink-600' : 'text-gray-700'}`}>
+                                  bKash {bKashType === 'agent' ? '(Cash Out)' : '(Send Money)'}
+                                </span>
+                              </button>
+                            )}
+                          </div>
+
+                          {paymentMethod === 'bkash' && (
+                            <div className="mt-4 p-4 bg-pink-50/50 rounded-2xl border border-pink-100 space-y-4 animate-in fade-in slide-in-from-top-2">
+                              <p className="text-xs text-pink-700 font-bold leading-relaxed">
+                                Please {bKashType === 'agent' ? 'Cash Out' : 'Send'} <span className="font-black text-base">{formatVal(cartTotal)}{currencySuffix}</span> to our bKash {bKashType} account: <span className="font-black text-pink-900 px-2 py-0.5 bg-white rounded shadow-sm">{selectedShop?.paymentConfig?.bKashNumber}</span>
+                              </p>
+
+                              <div className="space-y-3">
+                                <div>
+                                  <label className="text-[10px] font-black uppercase text-pink-800 tracking-widest">{isBn ? "বিকাশ নম্বর (যেই নম্বর থেকে পাঠিয়েছেন)" : "Sender bKash Number"}</label>
+                                  <input 
+                                    type="text" 
+                                    placeholder="e.g. 01700000000"
+                                    value={bKashSender}
+                                    onChange={(e) => setBKashSender(e.target.value)}
+                                    className="w-full px-4 py-3 text-sm bg-white border border-pink-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500 text-pink-900 font-bold mt-1"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-[10px] font-black uppercase text-pink-800 tracking-widest">{isBn ? "ট্রানজ্যাকশন আইডি (TxnID)" : "Transaction ID"}</label>
+                                  <input 
+                                    type="text" 
+                                    placeholder="e.g. 9B5X7Y2Z1"
+                                    value={bKashTxnId}
+                                    onChange={(e) => setBKashTxnId(e.target.value)}
+                                    className="w-full px-4 py-3 text-sm bg-white border border-pink-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500 text-pink-900 font-bold mt-1 uppercase"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-[10px] font-black uppercase text-pink-800 tracking-widest">{isBn ? "পেমেন্ট স্ক্রিনশট (প্রমান)" : "Payment Screenshot (Proof)"}</label>
+                                  <input 
+                                    type="file" 
+                                    accept="image/*"
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) {
+                                        const reader = new FileReader();
+                                        reader.onloadend = () => {
+                                          setBKashScreenshot(reader.result as string);
+                                        };
+                                        reader.readAsDataURL(file);
+                                      }
+                                    }}
+                                    className="w-full px-4 py-3 text-sm bg-white border border-pink-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500 text-pink-900 font-bold mt-1"
+                                  />
+                                  {bKashScreenshot && (
+                                    <div className="mt-2 text-center">
+                                      <img src={bKashScreenshot} alt="Screenshot" className="h-16 rounded object-cover mx-auto" />
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
                         {/* Order calculation breakdown */}
-                        <div className="flex items-center justify-between text-base font-black text-gray-900 pt-3 border-t border-dashed border-gray-100">
-                          <span>{isBn ? "মোট বিল" : "Grand Order Value"}</span>
-                          <span className="text-xl text-indigo-600">{formatVal(cartTotal)}{currencySuffix}</span>
+                        <div className="space-y-2 pt-3 border-t border-dashed border-gray-100">
+                          {paymentCharge > 0 && (
+                            <div className="flex items-center justify-between text-xs font-bold text-pink-600">
+                              <span>{isBn ? "বিকাশ ফি (১.৮%)" : "bKash Fee (1.8%)"}</span>
+                              <span>+{formatVal(paymentCharge)}{currencySuffix}</span>
+                            </div>
+                          )}
+                          <div className="flex items-center justify-between text-base font-black text-gray-900">
+                            <span>{isBn ? "মোট বিল" : "Grand Order Value"}</span>
+                            <span className="text-xl text-indigo-600">{formatVal(cartTotal)}{currencySuffix}</span>
+                          </div>
                         </div>
 
                         {/* Submit Button */}

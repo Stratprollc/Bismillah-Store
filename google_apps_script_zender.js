@@ -55,3 +55,47 @@ function linkWhatsAppDevice() {
     }
   }
 }
+
+/**
+ * Shop Master POS - WhatsApp Phone Number Linking (OTP Method)
+ * Completely bypasses QR Code scanning for Merchants
+ */
+function generateWALinkingCode(merchantPhone) {
+  // জেন্ডার অফিসিয়াল ওটিপি লিঙ্ক এন্ডপয়েন্ট (আপনার একটিভ সিক্রেট টোকেন সহ)
+  // এখানে merchantPhone মার্চেন্টের ইনপুট দেওয়া মোবাইল নম্বর
+  var url = "https://app.sellerscampus.com/api/create/wa.link?secret=4fe17fcfe73d5035f55b9144fa10e07443659005&phone=" + encodeURIComponent(merchantPhone);
+  
+  var options = {
+    "method": "get",
+    "muteHttpExceptions": true,
+    "headers": {
+      "Accept": "application/json"
+    }
+  };
+  
+  try {
+    var response = UrlFetchApp.fetch(url, options);
+    var responseText = response.getContentText().trim();
+    var json = JSON.parse(responseText);
+    
+    // জেন্ডার এপিআই সফলভাবে ৮ ডিজিটের কোড রিটার্ন করলে
+    let code = json.code || (json.data && json.data.qrstring) || null;
+    if (json.status === 200 && code) {
+      return JSON.stringify({
+        status: "success",
+        code: code // এই ৮ ডিজিটের কোডটি ফ্রন্টএ্যান্ডে বড় করে দেখাবেন
+      });
+    } else {
+      return JSON.stringify({
+        status: "error",
+        message: json.message || "Could not generate code. Make sure number is valid."
+      });
+    }
+  } catch (e) {
+    return JSON.stringify({
+      status: "error",
+      message: "Network Error: " + e.toString()
+    });
+  }
+}
+

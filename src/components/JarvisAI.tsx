@@ -8,9 +8,21 @@ import {
   Volume2,
   VolumeX,
   ShieldCheck,
-  Bot
+  Bot,
+  Brain,
+  Sparkles,
+  Database,
+  Plus,
+  Trash2,
+  Settings as SettingsIcon,
+  Bookmark,
+  CheckCircle2,
+  History,
+  MessageSquare,
+  HelpCircle,
+  Edit2
 } from 'lucide-react';
-import { db, collection, doc, updateDoc, deleteDoc, addDoc, handleFirestoreError, OperationType } from '../firebase';
+import { db, collection, doc, updateDoc, deleteDoc, addDoc, handleFirestoreError, OperationType, query, where, onSnapshot, setDoc } from '../firebase';
 import { fuzzyMatchProduct } from '../utils/productMatcher';
 
 // Standard Web Speech API types
@@ -93,6 +105,199 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
   useEffect(() => { isSpeakingRef.current = isSpeaking; }, [isSpeaking]);
   useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
   const [errorCount, setErrorCount] = useState(0);
+
+  // AI Memory Center states
+  const [currentMode, setCurrentMode] = useState<'assistant' | 'memory'>('assistant');
+  const [memories, setMemories] = useState<any[]>([]);
+  const [synonyms, setSynonyms] = useState<any[]>([]);
+  const [aiSettings, setAiSettings] = useState<any>({
+    personality: 'friendly',
+    customGreeting: '',
+    shortTermMemoryLimit: 10,
+    strictnessLevel: 'optimal'
+  });
+
+  // Inputs for memory updates
+  const [newMemoryText, setNewMemoryText] = useState('');
+  const [newMemoryCategory, setNewMemoryCategory] = useState('business_rules');
+  const [newSpokenWord, setNewSpokenWord] = useState('');
+  const [newActualProduct, setNewActualProduct] = useState('');
+  const [isSavingMemory, setIsSavingMemory] = useState(false);
+
+  // Firestore Real-time Synchronizers for AI memory & custom features
+  useEffect(() => {
+    if (!shopId) return;
+    
+    // Subscribe to custom factual memories
+    const qMemories = query(collection(db, 'ai_memories'), where('shopId', '==', shopId));
+    const unsubMemories = onSnapshot(qMemories, (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach(d => {
+        list.push({ id: d.id, ...d.data() });
+      });
+      setMemories(list);
+    }, (err) => {
+      console.error("Firestore onSnapshot error for ai_memories:", err);
+    });
+
+    // Subscribe to spoken to product synonyms/aliases
+    const qSynonyms = query(collection(db, 'ai_synonyms'), where('shopId', '==', shopId));
+    const unsubSynonyms = onSnapshot(qSynonyms, (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach(d => {
+        list.push({ id: d.id, ...d.data() });
+      });
+      setSynonyms(list);
+    }, (err) => {
+      console.error("Firestore onSnapshot error for ai_synonyms:", err);
+    });
+
+    // Subscribe to AI settings (personality and greetings)
+    const unsubSettings = onSnapshot(doc(db, 'ai_settings', shopId), (snapshot) => {
+      if (snapshot.exists()) {
+        setAiSettings(snapshot.data());
+      }
+    }, (err) => {
+      console.error("Firestore onSnapshot error for ai_settings:", err);
+    });
+
+    return () => {
+      unsubMemories();
+      unsubSynonyms();
+      unsubSettings();
+    };
+  }, [shopId]);
+
+  const handleAddMemory = async () => {
+    if (!newMemoryText.trim() || !shopId) return;
+    setIsSavingMemory(true);
+    try {
+      await addDoc(collection(db, 'ai_memories'), {
+        shopId,
+        text: newMemoryText.trim(),
+        category: newMemoryCategory,
+        createdAt: new Date().toISOString(),
+        isActive: true
+      });
+      setNewMemoryText('');
+    } catch (err) {
+      console.error("Error adding AI memory:", err);
+    } finally {
+      setIsSavingMemory(false);
+    }
+  };
+
+  const handleDeleteMemory = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'ai_memories', id));
+    } catch (err) {
+      console.error("Error deleting AI memory:", err);
+    }
+  };
+
+  const handleAddSynonym = async () => {
+    if (!newSpokenWord.trim() || !newActualProduct.trim() || !shopId) return;
+    try {
+      await addDoc(collection(db, 'ai_synonyms'), {
+        shopId,
+        spokenWord: newSpokenWord.trim().toLowerCase(),
+        actualProductName: newActualProduct.trim(),
+        createdAt: new Date().toISOString()
+      });
+      setNewSpokenWord('');
+      setNewActualProduct('');
+    } catch (err) {
+      console.error("Error adding pronunciation synonym:", err);
+    }
+  };
+
+  const handleDeleteSynonym = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'ai_synonyms', id));
+    } catch (err) {
+      console.error("Error deleting synonym:", err);
+    }
+  };
+
+  const handleSaveAiSettings = async (updates: any) => {
+    if (!shopId) return;
+    try {
+      const ref = doc(db, 'ai_settings', shopId);
+      await setDoc(ref, {
+        shopId,
+        ...aiSettings,
+        ...updates
+      }, { merge: true });
+    } catch (err) {
+      console.error("Error saving AI settings configs:", err);
+    }
+  };
+
+  // Brain Simulator states & evaluations
+  const [testQuery, setTestQuery] = useState('');
+  const [testResult, setTestResult] = useState('');
+  const [isTestingBrain, setIsTestingBrain] = useState(false);
+
+  const handleTestBrain = async () => {
+    if (!testQuery.trim()) return;
+    setIsTestingBrain(true);
+    setTestResult('');
+    try {
+      const customMemoriesString = memories && memories.length > 0
+        ? memories.map(m => `- [${m.category}]: ${m.text}`).join('\n')
+        : "No custom business rules or facts stored in the virtual memory yet.";
+
+      const customSynonymsString = synonyms && synonyms.length > 0
+        ? synonyms.map(s => `- Speaking "${s.spokenWord}" refers to product/inventory: "${s.actualProductName}"`).join('\n')
+        : "No custom mappings stored yet.";
+
+      let personalityBlock = "You are a professional shop manager assistant. You are extremely helpful, humble, and polite.";
+      if (aiSettings?.personality === 'strict') {
+        personalityBlock = "You are a strict, precise accountant & manager who is extremely firm, short, and highly accurate with financial numbers. No extra greetings.";
+      } else if (aiSettings?.personality === 'friendly') {
+        personalityBlock = "You are an incredibly warm, enthusiastic, and friendly shop assistant. Make the user feel relaxed, comfortable, and speak with high warmth.";
+      } else if (aiSettings?.personality === 'professional') {
+        personalityBlock = "You are a highly polished corporate assistant: formal, polite, objective, and clear.";
+      }
+
+      const customGreetingBlock = aiSettings?.customGreeting 
+        ? `Additionally, whenever greeting the user or initiating chat, you should align with this custom style preference: "${aiSettings.customGreeting}"`
+        : "";
+
+      const responseFetch = await fetch('/api/gemini/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: testQuery,
+          systemInstruction: `You are the AI Assistant for Bismillah Store Management System. Here to test your custom cognitive brain configuration in real-time.
+          
+          # SYSTEM CONFIGURATION CURRENT SETTINGS:
+          ${personalityBlock}
+          ${customGreetingBlock}
+          
+          # BRAIN MEMORIES:
+          ${customMemoriesString}
+
+          # SPEECH SYNONYMS:
+          ${customSynonymsString}
+          
+          Provide a test response according to your cognitive memories.`
+        })
+      });
+
+      const resJson = await responseFetch.json();
+      if (resJson.text) {
+        setTestResult(resJson.text);
+      } else {
+        setTestResult("ক্ষমা করবেন, কোনো উত্তর পাওয়া যায়নি। দয়া করে আবার চেষ্টা করুন।");
+      }
+    } catch (err) {
+      console.error("Error simulating brain feedback:", err);
+      setTestResult("Error evaluating assistant response: " + String(err));
+    } finally {
+      setIsTestingBrain(false);
+    }
+  };
   
   // Use settings from systemData
   const language = systemData.settings.jarvisLanguage || 'bn';
@@ -630,6 +835,31 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
         return;
       }
 
+      // Compile long-term factual memories
+      const customMemoriesString = memories && memories.length > 0
+        ? memories.map(m => `- [${m.category}]: ${m.text}`).join('\n')
+        : "No custom business rules or facts stored in the virtual memory yet.";
+
+      // Compile pronunciation/slang synonyms
+      const customSynonymsString = synonyms && synonyms.length > 0
+        ? synonyms.map(s => `- Speaking "${s.spokenWord}" refers to product/inventory: "${s.actualProductName}"`).join('\n')
+        : "No custom mappings stored yet.";
+
+      // Determine personality instruction override
+      let personalityBlock = "You are a professional shop manager assistant. You are extremely helpful, humble, and polite.";
+      if (aiSettings?.personality === 'strict') {
+        personalityBlock = "You are a strict, precise accountant & manager who is extremely firm, short, and highly accurate with financial numbers. No extra greetings.";
+      } else if (aiSettings?.personality === 'friendly') {
+        personalityBlock = "You are an incredibly warm, enthusiastic, and friendly shop assistant. Make the user feel relaxed, comfortable, and speak with high warmth.";
+      } else if (aiSettings?.personality === 'professional') {
+        personalityBlock = "You are a highly polished corporate assistant: formal, polite, objective, and clear.";
+      }
+
+      // Read custom greeting override
+      const customGreetingBlock = aiSettings?.customGreeting 
+        ? `Additionally, whenever greeting the user or initiating chat, you should align with this custom style preference: "${aiSettings.customGreeting}"`
+        : "";
+
       const responseFetch = await fetch('/api/gemini/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -644,8 +874,17 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
           - EVEN IF the user speaks to you in English, if the setting is 'bn', you MUST respond in BENGALI.
           - ABSOLUTELY NO English sentences or phrases (except product names).
           
-          # PERSONALITY:
-          You are a professional shop manager assistant. You are extremely helpful and quick.
+          # PERSONALITY & GREETINGS:
+          ${personalityBlock}
+          ${customGreetingBlock}
+          
+          # COGNITIVE MEMORY SYSTEM (DYNAMICALLY LEARNED FROM MEMORY CORE):
+          You have access to the business rules and facts below. Strictly comply with them as if they are hardcoded laws:
+          ${customMemoriesString}
+
+          # PHONETIC PRONUNCIATION SYNONYMS:
+          The user might use local Bengali/slang spoken words which map to actual inventory items. Keep these in mind:
+          ${customSynonymsString}
           
           # NO REDIRECTION / SILENT PERFORMANCE PROTOCOL:
           - Do NOT automatically use 'navigateApp' to switch tabs or close the assistant panel when checking stock, adding sales, adding products, or checking details. Keep the user on their active view.
@@ -675,7 +914,7 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
           # FUNCTION USAGE:
           Execute tools when requested/implied and confirm in ${language === 'bn' ? 'বাংলা' : 'English'}.`,
           tools: [{ functionDeclarations: tools }],
-          config: { model: "gemini-1.5-flash-latest" }
+          config: { model: "gemini-3.5-flash" }
         })
       });
 
@@ -1208,13 +1447,21 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
           </div>
         </div>
 
-        <div className="hidden lg:flex items-center gap-6">
-           <div className="px-10 py-3 border border-indigo-100 rounded-full bg-white relative overflow-hidden group shadow-sm">
-              <div className="orbitron-clean text-xl font-black bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent">
-                 SHOPMASTER <span className="text-slate-700 opacity-90">INTELLIGENCE</span>
-              </div>
-              <div className="absolute bottom-0 left-0 h-[2px] w-full bg-gradient-to-r from-transparent via-indigo-400 to-transparent transform -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></div>
-           </div>
+        <div className="flex items-center bg-[#f1f5f9] p-1.5 rounded-2xl border border-indigo-100 shadow-sm relative z-40">
+          <button 
+            onClick={() => setCurrentMode('assistant')}
+            className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all duration-300 flex items-center gap-2 ${currentMode === 'assistant' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-705'}`}
+          >
+            <Bot className="w-4 h-4" />
+            <span>কণ্ঠ সহকারী (Voice)</span>
+          </button>
+          <button 
+            onClick={() => setCurrentMode('memory')}
+            className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all duration-300 flex items-center gap-2 ${currentMode === 'memory' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-705'}`}
+          >
+            <Brain className="w-4 h-4" />
+            <span>মেমোরি সেন্টার (Memory Core)</span>
+          </button>
         </div>
 
         <div className="flex items-center gap-4">
@@ -1232,7 +1479,8 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
       </div>
 
       <div className="flex-1 p-3 lg:p-6 overflow-hidden relative flex flex-col min-h-0">
-        <div className="hud-columns flex lg:flex-row flex-col gap-4 lg:gap-6 flex-1 overflow-hidden w-full pb-2 lg:pb-6">
+        {currentMode === 'assistant' ? (
+          <div className="hud-columns flex lg:flex-row flex-col gap-4 lg:gap-6 flex-1 overflow-hidden w-full pb-2 lg:pb-6">
           
           {/* LEFT COLUMN */}
           <div className="hud-column-left flex-1 lg:flex-none w-full lg:w-[320px] flex flex-col gap-4 shrink-0">
@@ -1439,6 +1687,335 @@ export const JarvisAI: React.FC<JarvisAIProps> = ({ onClose, shopId, systemData,
              </div>
           </div>
         </div>
+        ) : (
+          <div className="flex-1 overflow-y-auto lg:overflow-hidden flex flex-col gap-6 w-full pb-2 lg:pb-6 custom-scroll-jarvis">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-full flex-1 min-h-0">
+              
+              {/* LEFT CARD: AI Configuration & Personality (Col span 4) */}
+              <div className="lg:col-span-4 flex flex-col gap-5 h-full min-h-0 overflow-y-auto custom-scroll-jarvis">
+                
+                {/* Personality Card */}
+                <div className="hud-panel p-6 bg-white flex flex-col gap-4 border border-indigo-150 shadow-md rounded-[20px]">
+                  <div className="hud-header -mx-6 -mt-6 rounded-t-[20px] bg-gradient-to-r from-violet-500/10 to-indigo-500/10 text-indigo-700 px-6 py-4 flex items-center gap-2 font-bold uppercase tracking-wider text-xs">
+                    <SettingsIcon className="w-4 h-4 text-indigo-605" />
+                    <span>এআই ব্যক্তিত্ব সেটিংস (AI Personality Settings)</span>
+                  </div>
+                  
+                  <div className="space-y-4 mt-2">
+                    <div>
+                      <label className="block text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">এআই ব্যক্তিত্ব (AI Personality)</label>
+                      <select 
+                        value={aiSettings.personality || 'friendly'}
+                        onChange={(e) => handleSaveAiSettings({ personality: e.target.value })}
+                        className="w-full bg-slate-50 border border-slate-205 focus:border-indigo-400 text-slate-700 font-semibold rounded-xl py-3 px-4 text-xs outline-none transition-all shadow-sm"
+                      >
+                        <option value="friendly">😊 বিনয়ী ও আন্তরিক সহকারী (Friendly & Warm)</option>
+                        <option value="strict">💼 কড়া হিসাবরক্ষক ও পিনপয়েন্ট নির্ভুল (Strict & Firm)</option>
+                        <option value="professional">🎓 প্রফেশনাল ও ধীরস্থির ম্যানেজার (Professional & Polite)</option>
+                      </select>
+                      <p className="text-[10px] text-slate-400 mt-1.5 leading-relaxed font-semibold">
+                        {aiSettings.personality === 'strict' 
+                          ? 'এআই আপনার সাথে অত্যন্ত সংক্ষিপ্ত এবং শুধু নির্ভুল হিসাব নিয়ে কথা বলবে।'
+                          : aiSettings.personality === 'friendly'
+                          ? 'এআই খুব মধুর কণ্ঠে এবং আন্তরিকভাবে যেকোনো বিষয় বুঝিয়ে বলবে।'
+                          : 'এআই প্রফেশনাল কর্পোরেট ম্যানেজারের মতো পরিমিত ভাষায় কথা বলবে।'}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">কাস্টম স্বাগতম বার্তা (Custom Greeting Style)</label>
+                      <textarea
+                        value={aiSettings.customGreeting || ''}
+                        onChange={(e) => handleSaveAiSettings({ customGreeting: e.target.value })}
+                        placeholder="যেমন: 'আসসালামু আলাইকুম স্যার, বিসমিল্লাহ স্টোরে আপনাকে স্বাগতম। বলুন কিভাবে সাহায্য করতে পারি?'"
+                        rows={3}
+                        className="w-full bg-slate-50 border border-slate-205 focus:border-indigo-400 text-slate-705 font-semibold rounded-xl py-3 px-4 text-xs outline-none transition-all shadow-sm placeholder:text-slate-350"
+                      />
+                      <p className="text-[10px] text-slate-400 mt-1 leading-relaxed font-semibold">
+                        সহকারীকে প্রথম কানেক্ট করার সময় সে এই কাস্টম স্টাইল বজায় রেখে স্বাগতম জানাবে।
+                      </p>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-100 flex justify-between items-center text-[11px]">
+                      <span className="font-bold text-slate-400 uppercase tracking-widest">শব্দকোষ স্মৃতিসীমা:</span>
+                      <span className="font-bold text-indigo-600 font-mono">10,000+ TOKENS</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Live AI Brain Simulator Sandbox */}
+                <div className="hud-panel p-6 bg-slate-900 border border-slate-800 text-white rounded-[20px] shadow-lg flex flex-col gap-4 relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500 rounded-full blur-3xl opacity-20 pointer-events-none"></div>
+                  
+                  <div className="flex items-center gap-2 pb-2 border-b border-slate-800">
+                    <Sparkles className="w-4 h-4 text-indigo-400 animate-pulse" />
+                    <span className="text-xs font-black uppercase tracking-wider text-slate-300">লাইভ ব্রেন টেস্ট (Real-time Sandbox)</span>
+                  </div>
+
+                  <p className="text-[10px] text-slate-400 font-bold leading-relaxed">
+                    আপনার সংরক্ষণ করা নতুন স্মৃতি এবং সেটিংস অ্যাসিস্ট্যান্টের উপরে কেমন প্রভাব ফেলছে তা রিয়েল-টাইমে এখানে পরীক্ষা করুন।
+                  </p>
+
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      value={testQuery}
+                      onChange={(e) => setTestQuery(e.target.value)}
+                      placeholder="যেমন: শুক্রবার কি কোনো অফার আছে?"
+                      className="w-full bg-slate-800/80 border border-slate-700 focus:border-indigo-500 text-white font-semibold rounded-xl py-2.5 px-4 text-xs outline-none transition-all placeholder:text-slate-500"
+                    />
+
+                    <button
+                      onClick={handleTestBrain}
+                      disabled={isTestingBrain || !testQuery.trim()}
+                      className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-40"
+                    >
+                      {isTestingBrain ? (
+                        <>
+                          <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                          <span>ব্রেন জেনারেট করছে...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Brain className="w-3.5 h-3.5 text-indigo-100" />
+                          <span>মেমোরি টেস্ট করুন (Simulate Brain)</span>
+                        </>
+                      )}
+                    </button>
+
+                    {testResult && (
+                      <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-1 max-h-[140px] overflow-y-auto custom-scroll-jarvis">
+                        <span className="text-[9px] font-black uppercase tracking-widest text-indigo-400">এআই ব্রেন রেসপন্স:</span>
+                        <p className="text-xs text-slate-200 leading-relaxed font-semibold font-sans">{testResult}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Instant Memory Templates */}
+                <div className="hud-panel p-5 bg-indigo-50/50 border border-indigo-100 rounded-[20px] flex flex-col gap-3">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600 flex items-center gap-1.5">
+                    <Database className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>সহজ টেমপ্লেট গ্যালারি (Quick Templates)</span>
+                  </span>
+                  
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { label: "🎁 শুক্রবার অফার", text: "শুক্রবার সব কেনাকাটায় ৫% বিশেষ ক্যাশব্যাক অফার দেওয়া হবে এবং স্পেশাল গিফট পাবেন।", cat: "business_rules" },
+                      { label: "🚚 ফ্রি হোম ডেলিভারি", text: "যে কোন কাস্টমার ৫,০০০ টাকার বেশি পণ্য অর্ডার করলে ঢাকার ভিতরে ফ্রি হোম ডেলিভারি দেওয়া হবে।", cat: "business_rules" },
+                      { label: "⏰ দোকানের সময়", text: "দোকান খোলার সময় প্রতিদিন সকাল ১০:০০ টা এবং বন্ধের সময় রাত ১০:৩০ টা।", cat: "shop_info" },
+                      { label: "👥 রহমান সাহেব নোট", text: "রহমান সাহেব আমাদের একজন রেগুলার কাস্টমার, উনার সাথে সদয় আচরণ করবেন এবং প্রয়োজনে বকেয়া অনুমোদন করতে পারেন।", cat: "customer_preference" }
+                    ].map((item, idx) => (
+                      <button
+                        key={idx}
+                        onClick={async () => {
+                          if (!shopId) return;
+                          try {
+                            await addDoc(collection(db, 'ai_memories'), {
+                              shopId,
+                              text: item.text,
+                              category: item.cat,
+                              createdAt: new Date().toISOString(),
+                              isActive: true
+                            });
+                          } catch (err) {
+                            console.error("Error inserting template memory:", err);
+                          }
+                        }}
+                        className="py-2.5 px-3 bg-white hover:bg-indigo-50 border border-slate-150 rounded-xl text-[10px] font-black text-slate-605 hover:text-indigo-600 transition-all text-left shadow-[0_1px_2px_rgba(0,0,0,0.02)] flex flex-col justify-between hover:scale-101 active:scale-99 h-[64px]"
+                      >
+                        <span className="text-indigo-600 truncate">{item.label}</span>
+                        <span className="text-[8px] text-slate-400 font-bold line-clamp-1 block mt-1">ক্লিক করুন যুক্ত করতে</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+              </div>
+
+              {/* MIDDLE CARD: Knowledge Pool Facts (Col span 5) */}
+              <div className="lg:col-span-5 flex flex-col gap-4 h-full min-h-0 overflow-hidden bg-white border border-indigo-100 shadow-md rounded-[20px] p-6">
+                
+                <div className="flex justify-between items-center border-b border-slate-105 pb-4">
+                  <div className="flex items-center gap-2">
+                    <Brain className="w-5 h-5 text-indigo-600" />
+                    <div>
+                      <h3 className="font-black text-slate-800 text-sm">স্মৃতিভাণ্ডার ও সাধারণ নিয়ম (Knowledge Core)</h3>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">এখানে এআই-এর জন্য কাস্টম তথ্য ও নিয়ম লিখুন</p>
+                    </div>
+                  </div>
+                  <span className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full font-bold text-[10px] font-mono">
+                    {memories.length} FACTS
+                  </span>
+                </div>
+
+                {/* Add memory form */}
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-150 space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="sm:col-span-2">
+                      <input 
+                        type="text"
+                        placeholder="সহকারীকে মনে রাখতে বলুন: (যেমন: শুক্রবার ৫% ছাড়)"
+                        value={newMemoryText}
+                        onChange={e => setNewMemoryText(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && handleAddMemory()}
+                        className="w-full bg-white border border-slate-205 focus:border-indigo-400 text-slate-705 font-semibold rounded-lg py-2.5 px-3.5 text-xs outline-none transition-all shadow-sm"
+                      />
+                    </div>
+                    <div>
+                      <select 
+                        value={newMemoryCategory}
+                        onChange={e => setNewMemoryCategory(e.target.value)}
+                        className="w-full bg-white border border-slate-205 focus:border-indigo-400 text-slate-705 font-semibold rounded-lg py-2.5 px-3 text-xs outline-none transition-all shadow-sm"
+                      >
+                        <option value="business_rules">📢 ব্যবসায়িক নিয়ম</option>
+                        <option value="shop_info">🏪 সাধারণ তথ্য</option>
+                        <option value="customer_preference">👥 কাস্টমার নোট</option>
+                        <option value="general_context">📝 অন্যান্য জ্ঞান</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex justify-end">
+                    <button
+                      onClick={handleAddMemory}
+                      disabled={isSavingMemory || !newMemoryText.trim()}
+                      className="px-5 py-2 bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 rounded-lg text-xs font-bold transition-all shadow-md flex items-center gap-1.5 hover:scale-102 active:scale-98"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>মেমোরিতে যুক্ত করুন (Add to Core)</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Memories list container */}
+                <div className="flex-1 overflow-y-auto custom-scroll-jarvis space-y-3 pr-1">
+                  {memories.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-center p-8 border border-dashed border-slate-200 rounded-xl bg-slate-50">
+                      <Database className="w-10 h-10 text-slate-300 mb-3 animate-[pulse_2s_infinite]" />
+                      <p className="text-xs text-slate-400 font-bold">কোনো কাস্টম স্মৃতি যুক্ত করা হয়নি এখনও।</p>
+                      <p className="text-[10px] text-slate-400 mt-1 max-w-[240px]">ডানপাশের ফর্ম ব্যবহার করে প্রথম পয়েন্ট যোগ করুন, এবং অ্যাসিস্ট্যান্টকে সেটি বাস্তব সময়ে প্রয়োগ করতে দেখুন!</p>
+                    </div>
+                  ) : (
+                    memories.map((m) => {
+                      let catColor = "bg-rose-50 text-rose-600 border-rose-100";
+                      let catLabel = "অন্যান্য জ্ঞান";
+                      if (m.category === "business_rules") {
+                        catColor = "bg-emerald-50 text-emerald-600 border-emerald-100";
+                        catLabel = "ব্যবসায়িক নিয়ম";
+                      } else if (m.category === "shop_info") {
+                        catColor = "bg-blue-50 text-blue-600 border-blue-105";
+                        catLabel = "সাধারণ তথ্য";
+                      } else if (m.category === "customer_preference") {
+                        catColor = "bg-purple-50 text-purple-600 border-purple-100";
+                        catLabel = "কাস্টমার নোট";
+                      }
+
+                      return (
+                        <div key={m.id} className="p-3.5 bg-white border border-slate-105 hover:border-indigo-100 rounded-xl flex items-start gap-3.5 justify-between transition-all group hover:shadow-sm">
+                          <div className="flex-1 min-w-0 space-y-1.5">
+                            <span className={`inline-block px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider border ${catColor}`}>
+                              {catLabel}
+                            </span>
+                            <p className="text-xs font-semibold text-slate-700 leading-relaxed font-sans">{m.text}</p>
+                          </div>
+                          <button 
+                            onClick={() => handleDeleteMemory(m.id)}
+                            className="p-2 text-slate-300 hover:text-red-500 rounded-lg hover:bg-red-50 transition-all self-center shrink-0"
+                            title="মুছে ফেলুন"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+              </div>
+
+              {/* RIGHT CARD: Phonetic Synonyms (Col span 3) */}
+              <div className="lg:col-span-3 flex flex-col gap-4 h-full min-h-0 overflow-hidden bg-white border border-indigo-100 shadow-md rounded-[20px] p-6">
+                
+                <div className="flex justify-between items-center border-b border-slate-105 pb-4">
+                  <div className="flex items-center gap-2">
+                    <Bookmark className="w-4 h-4 text-indigo-600" />
+                    <div>
+                      <h3 className="font-black text-slate-800 text-sm">উচ্চারণ অভিধান ও প্রতিশব্দ (Synonyms)</h3>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">আঞ্চলিক বা কথ্য ভাষা ম্যাপিং রাখুন</p>
+                    </div>
+                  </div>
+                  <span className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full font-bold text-[10px] font-mono">
+                    {synonyms.length}
+                  </span>
+                </div>
+
+                {/* Add Synonym Form */}
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-150 space-y-3">
+                  <div>
+                    <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1.5">উচ্চারণ বা ডাকনাম (Spoken Word)</label>
+                    <input 
+                      type="text"
+                      placeholder="যেমন: আদা, পিয়াজ, চিনিগুড়া"
+                      value={newSpokenWord}
+                      onChange={e => setNewSpokenWord(e.target.value)}
+                      className="w-full bg-white border border-slate-205 focus:border-indigo-400 text-slate-705 font-semibold rounded-lg py-2 px-3 text-xs outline-none transition-all shadow-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1.5">সিস্টেমের মূল প্রোডাক্ট (Actual Product)</label>
+                    <input 
+                      type="text"
+                      placeholder="যেমন: Ginger, Onion Red, Rice Chinigura"
+                      value={newActualProduct}
+                      onChange={e => setNewActualProduct(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleAddSynonym()}
+                      className="w-full bg-white border border-slate-205 focus:border-indigo-400 text-slate-705 font-semibold rounded-lg py-2 px-3 text-xs outline-none transition-all shadow-sm"
+                    />
+                  </div>
+                  <button 
+                    onClick={handleAddSynonym}
+                    disabled={!newSpokenWord.trim() || !newActualProduct.trim()}
+                    className="w-full py-2.5 bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 rounded-lg text-xs font-black transition-all shadow-sm flex items-center justify-center gap-1.5 hover:scale-102 active:scale-98"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>শব্দ অভিধানে যুক্ত করুন</span>
+                  </button>
+                </div>
+
+                {/* Synonym Mappings Table */}
+                <div className="flex-1 overflow-y-auto custom-scroll-jarvis space-y-2 pr-1">
+                  {synonyms.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-center p-6 border border-dashed border-slate-200 rounded-xl bg-slate-50">
+                      <HelpCircle className="w-8 h-8 text-slate-300 mb-2" />
+                      <p className="text-[10px] text-slate-400 font-bold">কোন শব্দ ম্যাপিং যোগ করা নেই।</p>
+                      <p className="text-[8px] text-slate-400 mt-0.5 line-clamp-3">যেমন বাংলায় মুখের কথা "কোকা কোলা" কে ইনভেন্টরির "Coca Cola Can" এর সাথে মেলাতে প্রতিশব্দ যোগ করুন।</p>
+                    </div>
+                  ) : (
+                    synonyms.map((s) => (
+                      <div key={s.id} className="p-3 bg-white border border-slate-105 hover:border-indigo-50 rounded-lg flex justify-between items-center transition-all group shadow-[inset_0_1px_2px_rgba(0,0,0,0.01)]">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-black text-rose-500 font-mono">"{s.spokenWord}"</span>
+                            <span className="text-[9px] text-slate-400">➔</span>
+                            <span className="text-[10px] font-black text-indigo-600 font-mono truncate max-w-[100px]">{s.actualProductName}</span>
+                          </div>
+                        </div>
+                        <button 
+                          onClick={() => handleDeleteSynonym(s.id)}
+                          className="p-1.5 text-slate-300 hover:text-red-500 rounded-md hover:bg-slate-50 transition-all ml-2"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+              </div>
+
+            </div>
+          </div>
+        )}
 
       {/* Bottom Footer Info (GAUG Area) */}
       <div className="h-[70px] px-6 pb-6 flex gap-4 shrink-0 mt-auto">

@@ -146,7 +146,7 @@ service cloud.firestore {
           resource != null && 
           resource.data.shopId != null && 
           isOwnerOrStaff(resource.data.shopId) && 
-          collection in ['recycleBin', 'daily_closings', 'expenses', 'investments', 'staff_salaries', 'stockRecords', 'branches', 'employees', 'notes', 'customer_logs', 'due_payments', 'warranty_records']
+          collection in ['recycleBin', 'daily_closings', 'expenses', 'investments', 'staff_salaries', 'stockRecords', 'branches', 'employees', 'notes', 'customer_logs', 'due_payments', 'warranty_records', 'meet_sessions', 'ai_memories', 'ai_synonyms', 'ai_settings']
         )
       );
     }
@@ -185,6 +185,12 @@ service cloud.firestore {
     match /settings/{shopId} {
       allow read: if isMasterAdmin() || isOwnerOrStaff(shopId);
       allow write: if isMasterAdmin() || isOwnerOrStaff(shopId);
+    }
+
+    match /permanent_merchant_codes/{docId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update, delete: if isMasterAdmin();
     }
 
     match /shops {

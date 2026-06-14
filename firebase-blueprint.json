@@ -272,12 +272,33 @@
         "soldPrice": { "type": "number" }
       },
       "required": ["shopId", "productId", "serialNumber", "warrantyPeriod", "createdAt"]
+    },
+    "MeetSession": {
+      "title": "MeetSession",
+      "description": "Google Meet session details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "startTime": { "type": "string", "format": "date-time" },
+        "endTime": { "type": "string", "format": "date-time" },
+        "meetLink": { "type": "string" },
+        "spaceName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "shopId": { "type": "string" },
+        "exportedToSheet": { "type": "boolean" }
+      },
+      "required": ["title", "startTime", "endTime", "meetLink", "createdAt", "shopId"]
     }
   },
   "firestore": {
     "/warranty_records/{recordId}": {
       "schema": "WarrantyRecord",
       "description": "Collection of sold serialized warranty records"
+    },
+    "/meet_sessions/{recordId}": {
+      "schema": "MeetSession",
+      "description": "Collection of scheduled Google Meet sessions"
     },
     "/products/{productId}": {
       "schema": "Product",

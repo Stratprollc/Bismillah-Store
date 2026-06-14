@@ -20,9 +20,10 @@ import {
   Mail,
   Clock,
   Box,
-  Trash2
+  Trash2,
+  Key
 } from 'lucide-react';
-import { db, collection, getDocs, onSnapshot, query, orderBy, deleteDoc, updateDoc, doc, handleFirestoreError, OperationType, deleteShopAllData } from '../firebase';
+import { db, collection, getDocs, onSnapshot, query, orderBy, deleteDoc, updateDoc, doc, setDoc, handleFirestoreError, OperationType, deleteShopAllData } from '../firebase';
 
 interface Merchant {
   id: string;
@@ -48,6 +49,11 @@ export const NetworkConsole: React.FC = () => {
   const [confirmingDelete, setConfirmingDelete] = useState<Merchant | null>(null);
   const [statusNotification, setStatusNotification] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  const [showPromoModal, setShowPromoModal] = useState(false);
+  const [promoKeys, setPromoKeys] = useState<any[]>([]);
+  const [newPromoPlan, setNewPromoPlan] = useState('6 Months Premium');
+  const [manualPlanSelect, setManualPlanSelect] = useState('6 Months Premium');
+
   useEffect(() => {
     // In a real multi-tenant app, this would query a global 'merchants' collection
     // For this app, we'll try to find any 'settings' documents as they represent shops
@@ -62,7 +68,7 @@ export const NetworkConsole: React.FC = () => {
           createdAt: data.createdAt || new Date().toISOString(),
           lastActive: data.updatedAt || new Date().toISOString(),
           plan: 'Premium',
-          shopCode: data.shopCode,
+          shopCode: data.shopCode ? data.shopCode.toString().replace(/^SHP-/i, '').replace(/[^0-9]/g, '').slice(0, 6) : undefined,
           address: data.address,
           phone: data.phone,
           type: data.type,
@@ -79,11 +85,26 @@ export const NetworkConsole: React.FC = () => {
     return () => unsub();
   }, []);
 
-  const filteredMerchants = merchants.filter(m => 
-    m.shopName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+  const filteredMerchants = merchants.filter(m => {
+    if (m.id === 'master' || m.ownerEmail?.toLowerCase().trim() === 'stratproamz@gmail.com') return false;
+    return m.shopName.toLowerCase().includes(searchTerm.toLowerCase()) ||
     m.ownerEmail.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    m.shopCode?.includes(searchTerm)
-  );
+    m.shopCode?.includes(searchTerm);
+  });
+
+  useEffect(() => {
+    const unsubKeys = onSnapshot(collection(db, "promo_keys"), (snapshot) => {
+      const keys: any[] = [];
+      snapshot.forEach(doc => {
+        keys.push({ id: doc.id, ...doc.data() });
+      });
+      setPromoKeys(keys.sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+    }, (error) => {
+      console.warn("Failed to load promo keys", error);
+    });
+
+    return () => unsubKeys();
+  }, []);
 
   const executeDeleteMerchant = async (merchant: Merchant) => {
     try {
@@ -124,6 +145,69 @@ export const NetworkConsole: React.FC = () => {
     }
   };
 
+  const getDurationMonths = (planName: string) => {
+    if (planName === '6 Months Premium') return 6;
+    if (planName === '1 Year Premium') return 12;
+    if (planName === '2 Years Premium') return 24;
+    if (planName === '5 Years Premium') return 60;
+    return -1; // Lifetime
+  };
+
+  const executeGrantManualPremium = async (merchant: Merchant) => {
+    try {
+      const durationMonths = getDurationMonths(manualPlanSelect);
+      const isLifetime = durationMonths === -1;
+      let untilDateStr = null;
+
+      if (!isLifetime) {
+        const d = new Date();
+        d.setMonth(d.getMonth() + durationMonths);
+        untilDateStr = d.toISOString();
+      }
+
+      await updateDoc(doc(db, "shops", merchant.id), {
+        premiumActive: isLifetime,
+        premiumUntil: untilDateStr,
+        plan: manualPlanSelect
+      });
+
+      setSelectedMerchant(prev => prev && prev.id === merchant.id ? { ...prev, plan: manualPlanSelect } : prev);
+      
+      setStatusNotification({
+        type: 'success',
+        text: `Successfully upgraded to ${manualPlanSelect}.`
+      });
+    } catch (error) {
+      console.error(error);
+      setStatusNotification({ type: 'error', text: 'Error granting premium logic.' });
+    }
+  };
+
+  const generatePromoKey = async () => {
+    try {
+      const keyStr = 'PROMO-' + Math.random().toString(36).substring(2, 10).toUpperCase() + '-' + Math.random().toString(36).substring(2, 6).toUpperCase();
+      const durationMonths = getDurationMonths(newPromoPlan);
+
+      await setDoc(doc(db, "promo_keys", keyStr), {
+        key: keyStr,
+        plan: newPromoPlan,
+        durationMonths,
+        isUsed: false,
+        usedBy: null,
+        usedAt: null,
+        createdAt: new Date().toISOString()
+      });
+
+      setStatusNotification({
+        type: 'success',
+        text: `Generated new Promo Key: ${keyStr}`
+      });
+    } catch (error) {
+      console.error(error);
+      setStatusNotification({ type: 'error', text: 'Failed to generate promo key.' });
+    }
+  };
+
   return (
     <div className="p-4 md:p-6 bg-slate-50 min-h-screen">
       <div className="max-w-7xl mx-auto">
@@ -136,15 +220,24 @@ export const NetworkConsole: React.FC = () => {
             <p className="text-sm md:text-base text-slate-500 mt-1 md:mt-2 font-medium">Global overview of all active shops. Search by Name, Email, or Shop Code.</p>
           </div>
           
-          <div className="relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-indigo-400 w-5 h-5" />
-            <input 
-              type="text" 
-              placeholder="Search by code, email or name..."
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              className="pl-12 pr-4 py-3.5 bg-white border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all w-full md:w-96 shadow-[0_2px_10px_-3px_rgba(6,81,237,0.1)] text-slate-700 font-bold placeholder:font-medium"
-            />
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setShowPromoModal(true)}
+              className="flex items-center gap-2 px-4 py-3 bg-fuchsia-600 hover:bg-fuchsia-700 text-white font-bold rounded-2xl transition-all shadow-[0_2px_10px_-3px_rgba(192,38,211,0.4)] whitespace-nowrap"
+            >
+              <Key className="w-5 h-5" />
+              Promo Keys Manager
+            </button>
+            <div className="relative">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-indigo-400 w-5 h-5" />
+              <input 
+                type="text" 
+                placeholder="Search by code, email or name..."
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                className="pl-12 pr-4 py-3.5 bg-white border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all w-full md:w-80 shadow-[0_2px_10px_-3px_rgba(6,81,237,0.1)] text-slate-700 font-bold placeholder:font-medium"
+              />
+            </div>
           </div>
         </div>
 
@@ -220,8 +313,8 @@ export const NetworkConsole: React.FC = () => {
                     </tr>
                   ))
                 ) : filteredMerchants.length > 0 ? (
-                  filteredMerchants.map((merchant) => (
-                    <React.Fragment key={merchant.id}>
+                  filteredMerchants.map((merchant, idx) => (
+                    <React.Fragment key={merchant.id + '_' + idx}>
                       <tr className="hover:bg-indigo-50/30 transition-colors group">
                         <td className="px-8 py-5">
                           <div className="flex items-center gap-4">
@@ -405,6 +498,30 @@ export const NetworkConsole: React.FC = () => {
                     </div>
                   </div>
                 </div>
+
+                <div className="mt-8 pt-6 border-t border-slate-100">
+                  <h3 className="font-black text-slate-800 text-sm uppercase tracking-widest pb-3">Update Premium Access</h3>
+                  <div className="flex items-center gap-3">
+                    <select 
+                      value={manualPlanSelect}
+                      onChange={(e) => setManualPlanSelect(e.target.value)}
+                      className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="6 Months Premium">6 Months Premium</option>
+                      <option value="1 Year Premium">1 Year Premium</option>
+                      <option value="2 Years Premium">2 Years Premium</option>
+                      <option value="5 Years Premium">5 Years Premium</option>
+                      <option value="Lifetime Premium">Lifetime Premium</option>
+                    </select>
+                    <button 
+                      onClick={() => executeGrantManualPremium(selectedMerchant)}
+                      className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-all shadow-sm flex items-center gap-2"
+                    >
+                      <ShieldCheck className="w-4 h-4" />
+                      Grant Access
+                    </button>
+                  </div>
+                </div>
               </div>
               <div className="p-6 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="text-xs font-medium text-slate-400 flex items-center gap-1.5">
@@ -454,6 +571,98 @@ export const NetworkConsole: React.FC = () => {
 
       {createPortal(
         <AnimatePresence>
+          {/* Promo Keys Manager Modal */}
+          {showPromoModal && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+            >
+              <motion.div 
+                initial={{ scale: 0.95, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.95, opacity: 0, y: 20 }}
+                className="bg-white w-full max-w-3xl max-h-[85vh] flex flex-col rounded-3xl shadow-2xl border border-slate-100 overflow-hidden"
+              >
+                <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                  <div className="flex items-center gap-3">
+                    <div className="p-3 bg-fuchsia-100 text-fuchsia-600 rounded-xl">
+                      <Key className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-black text-slate-800">Promo / Activation Keys</h2>
+                      <p className="text-sm font-medium text-slate-500">Generate and track premium redeemable codes</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setShowPromoModal(false)}
+                    className="p-2 text-slate-400 hover:text-slate-600 bg-white border border-slate-200 rounded-xl transition-all"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                
+                <div className="p-6 border-b border-slate-100 bg-white">
+                  <h3 className="font-black text-sm uppercase tracking-widest text-slate-800 mb-4">Generate New Code</h3>
+                  <div className="flex items-center gap-3">
+                    <select 
+                      value={newPromoPlan}
+                      onChange={(e) => setNewPromoPlan(e.target.value)}
+                      className="px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-fuchsia-500 flex-1"
+                    >
+                      <option value="6 Months Premium">6 Months Premium</option>
+                      <option value="1 Year Premium">1 Year Premium</option>
+                      <option value="2 Years Premium">2 Years Premium</option>
+                      <option value="5 Years Premium">5 Years Premium</option>
+                      <option value="Lifetime Premium">Lifetime Premium</option>
+                    </select>
+                    <button 
+                      onClick={generatePromoKey}
+                      className="px-6 py-3 bg-fuchsia-600 hover:bg-fuchsia-700 text-white font-black rounded-xl transition-all shadow-sm"
+                    >
+                      Generate Key
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
+                  <div className="space-y-3">
+                    {promoKeys.length === 0 ? (
+                      <div className="text-center text-slate-400 py-10 font-medium">
+                        No keys generated yet.
+                      </div>
+                    ) : (
+                      promoKeys.map((k, idx) => (
+                        <div key={k.id + '_' + idx} className="bg-white p-4 rounded-2xl border border-slate-200 flex items-center justify-between shadow-sm">
+                          <div>
+                            <div className="font-mono font-black text-lg text-indigo-600">{k.key}</div>
+                            <div className="text-xs font-bold text-slate-500 mt-1 flex items-center gap-2">
+                              <span>Plan: <strong className="text-slate-700">{k.plan}</strong></span>
+                              <span>•</span>
+                              <span>Created: {new Date(k.createdAt).toLocaleDateString()}</span>
+                            </div>
+                          </div>
+                          <div>
+                            {k.isUsed ? (
+                              <span className="px-3 py-1 bg-slate-100 text-slate-500 text-xs font-bold uppercase tracking-widest rounded-lg border border-slate-200">
+                                Redeemed by: {k.usedBy}
+                              </span>
+                            ) : (
+                              <span className="px-3 py-1 bg-emerald-50 text-emerald-600 text-xs font-bold uppercase tracking-widest rounded-lg border border-emerald-200 animate-pulse">
+                                Active / Unused
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+
           {/* Custom Confirmation Modal for Blocking */}
           {confirmingBlock && (
             <motion.div 

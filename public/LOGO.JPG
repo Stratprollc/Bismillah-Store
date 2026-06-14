@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <!-- Background -->
+  <rect width="100%" height="100%" fill="#ffffff" rx="48"/>
+
+  <!-- Logo Group -->
+  <g transform="translate(16, 16)">
+    <!-- Outer Storefront Canopy & Pillars in Tech Green -->
+    <!-- Ground Line -->
+    <path d="M 50 420 L 430 420" stroke="#003D20" stroke-width="14" stroke-linecap="round"/>
+
+    <!-- Left Pillar -->
+    <path d="M 90 230 L 90 420" stroke="#003D20" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <!-- Right Pillar -->
+    <path d="M 390 230 L 390 420" stroke="#003D20" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- Left Canopy Scallop / Awning -->
+    <path d="M 190 190 L 70 190 C 50 190 50 240 70 240 C 90 240 90 210 110 210 C 130 210 130 240 150 240 C 170 240 170 210 190 210" fill="none" stroke="#003D20" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- Right Canopy Scallop / Awning -->
+    <path d="M 290 190 L 410 190 C 430 190 430 240 410 240 C 390 240 390 210 370 210 C 350 210 350 240 330 240 C 310 240 310 210 290 210" fill="none" stroke="#003D20" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <!-- Left Awning Top Slant -->
+    <path d="M 70 190 L 110 110 L 195 110" fill="none" stroke="#003D20" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <!-- Right Awning Top Slant -->
+    <path d="M 410 190 L 370 110 L 285 110" fill="none" stroke="#003D20" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- Huge Upward Arrow in Center -->
+    <!-- Arrow Body Outline and Fill -->
+    <path d="M 240 50 L 330 180 L 290 180 L 290 420 L 190 420 L 190 180 L 150 180 Z" fill="#ffffff" stroke="#003D20" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- Circuit Board Traces running up inside the Upward Arrow -->
+    <!-- Center Line Trace leading to Red Node -->
+    <path d="M 240 280 L 240 190" stroke="#003D20" stroke-width="8" stroke-linecap="round"/>
+    
+    <!-- Left Branch Trace -->
+    <path d="M 130 380 L 130 340 L 180 290 L 210 290 L 210 230" stroke="#003D20" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <circle cx="130" cy="380" r="10" fill="#003D20"/>
+    <circle cx="210" cy="230" r="10" fill="#003D20"/>
+
+    <!-- Right Branch Trace -->
+    <path d="M 350 380 L 350 340 L 300 290 L 270 290 L 270 210" stroke="#003D20" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <circle cx="350" cy="380" r="10" fill="#003D20"/>
+    <circle cx="270" cy="210" r="10" fill="#003D20"/>
+
+    <!-- Additional side circuit embellishments outside the arrow -->
+    <!-- Outer Left Circuit -->
+    <path d="M 130 300 L 170 300 L 170 370" stroke="#003D20" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <circle cx="130" cy="300" r="10" fill="#003D20"/>
+    <circle cx="170" cy="370" r="10" fill="#003D20"/>
+
+    <!-- Outer Right Circuit -->
+    <path d="M 350 300 L 310 300 L 310 370" stroke="#003D20" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <circle cx="350" cy="300" r="10" fill="#003D20"/>
+    <circle cx="310" cy="370" r="10" fill="#003D20"/>
+
+    <!-- Glowing Red Light Circle in Arrowhead -->
+    <!-- Red Outer Glow / Radial Blend simulation with multiple transparent circles -->
+    <circle cx="240" cy="140" r="32" fill="#DC2626" opacity="0.2"/>
+    <circle cx="240" cy="140" r="24" fill="#DC2626" opacity="0.4"/>
+    <circle cx="240" cy="140" r="16" fill="#DC2626"/>
+    <circle cx="240" cy="140" r="8" fill="#FFFFFF" opacity="0.6"/>
+  </g>
+</svg>

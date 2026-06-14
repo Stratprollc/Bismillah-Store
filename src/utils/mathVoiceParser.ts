@@ -39,7 +39,7 @@ Transcript: "${rawText}"
       body: JSON.stringify({
         prompt,
         config: {
-          model: "gemini-1.5-flash-latest",
+          model: "gemini-3.5-flash",
           generationConfig: {
             temperature: 0,
             maxOutputTokens: 64,

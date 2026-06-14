@@ -208,6 +208,30 @@ export function SellerOrdersView({ orders, products = [], lang, onLoadToPOS }: S
                           ))}
                         </div>
                       )}
+
+                      {/* Payment Information */}
+                      {order.paymentMethod && order.paymentMethod !== 'cod' && (
+                        <div className="mt-3 bg-pink-50/50 p-3 rounded-2xl border border-pink-100 max-w-sm">
+                          <p className="text-[10px] font-black text-pink-600 uppercase tracking-widest leading-none mb-2">
+                            {isBn ? "পেমেন্ট তথ্য (Payment Info)" : "Payment Information"}
+                          </p>
+                          <div className="space-y-1 text-xs">
+                            <p><span className="text-pink-800 font-bold">Method:</span> <span className="text-gray-700 uppercase">{order.paymentMethod}</span></p>
+                            {order.paymentDetails?.sender && (
+                              <p><span className="text-pink-800 font-bold">Sender No:</span> <span className="text-gray-700">{order.paymentDetails.sender}</span></p>
+                            )}
+                            {order.paymentDetails?.txnId && (
+                              <p><span className="text-pink-800 font-bold">Txn ID:</span> <span className="text-gray-700 font-mono">{order.paymentDetails.txnId}</span></p>
+                            )}
+                            {order.paymentDetails?.screenshot && (
+                              <div className="mt-2 text-left">
+                                <span className="text-[10px] font-black text-pink-600 uppercase">Proof:</span>
+                                <img src={order.paymentDetails.screenshot} alt="Screenshot Proof" className="mt-1 h-20 rounded border border-pink-200 shadow-sm" />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Order Value & Operation Controls */}
@@ -431,6 +455,12 @@ export function SellerOrdersView({ orders, products = [], lang, onLoadToPOS }: S
                             <p className="text-[9.5px] font-bold text-indigo-650 mt-0.5 font-mono">
                               {isBn ? "চালান নং:" : "Inv No:"} {pastOrder.invoiceNumber}
                             </p>
+                          )}
+                          {pastOrder.paymentMethod && pastOrder.paymentMethod !== 'cod' && (
+                            <div className="mt-1 text-[9px]">
+                              <span className="font-bold text-pink-600 bg-pink-50 px-1 py-0.5 rounded">{pastOrder.paymentMethod.toUpperCase()}</span>
+                              {pastOrder.paymentDetails?.txnId && <span className="ml-1 text-slate-500 font-mono">{pastOrder.paymentDetails.txnId}</span>}
+                            </div>
                           )}
                         </div>
                         <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${pastOrder.status === 'approved' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>

@@ -193,7 +193,7 @@ export default function Dashboard({
   setViewMetric 
 }: DashboardProps) {
 
-  const systemLang = settings?.systemLanguage || 'bn';
+  const systemLang = settings?.systemLanguage || 'en';
   const lt = LOCAL_TRANSLATIONS[systemLang === 'bn' ? 'bn' : 'en'];
 
   // Local state for full, reactive Firestore syncing matching the strict shopId rule
@@ -296,7 +296,7 @@ export default function Dashboard({
 
   const fC = (num: number) => {
     const symbol = settings?.currencySymbol || 'TK';
-    const lang = settings?.systemLanguage || 'bn';
+    const lang = settings?.systemLanguage || 'en';
     if (!num && num !== 0) return `${symbol} 0`;
     return `${symbol} ${parseFloat(num.toFixed(2)).toLocaleString(lang === 'bn' ? 'bn-BD' : 'en-US')}`;
   };

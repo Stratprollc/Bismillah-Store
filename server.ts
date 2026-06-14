@@ -5,7 +5,7 @@ import { GoogleGenAI } from "@google/genai";
 
 async function startServer() {
   const app = express();
-  const PORT = Number(process.env.PORT) || 3000;
+  const PORT = 3000;
   
   app.use(express.json());
 
@@ -28,8 +28,13 @@ async function startServer() {
         }
       });
       
+      let modelToUse = config?.model || "gemini-3.5-flash";
+      if (modelToUse.includes("gemini-1.5") || modelToUse === "gemini-flash-latest") {
+        modelToUse = "gemini-3.5-flash";
+      }
+
       const response = await ai.models.generateContent({ 
-        model: config?.model || "gemini-flash-latest",
+        model: modelToUse,
         contents: contents || [{ role: 'user', parts: [{ text: prompt }] }],
         config: {
           systemInstruction: systemInstruction,
@@ -52,80 +57,7 @@ async function startServer() {
   app.post('/api/gemini/voice-parse', handleGeminiGenerate);
 
   // Secure API endpoint to test the connection handshake with SellersCampus Zender master/merchant keys
-  app.post('/api/gateways/test-handshake', async (req: express.Request, res: express.Response) => {
-    try {
-      const { api_key, endpoint_url, waToken, waGatewayType, smsGatewayType } = req.body;
-      const key = api_key || waToken || process.env.ZENDER_MASTER_API_KEY;
-      const cleanEndpoint = (endpoint_url || 'https://app.sellerscampus.com/api/v1').trim().replace(/\/+$/, '');
 
-      if (!key || key === 'your_sellerscampus_zender_master_api_key_here') {
-        return res.json({
-          status: 'success',
-          message: 'Handshake Successful (Sandbox Engine Active). System backend connected.'
-        });
-      }
-
-      console.log(`[Zender Handshake Test] Pinging endpoint: ${cleanEndpoint}/system/status with token...`);
-      try {
-        const response = await fetch(`${cleanEndpoint}/system/status`, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${key}`,
-            'Content-Type': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-          }
-        });
-
-        if (response.ok) {
-          const data: any = await response.json();
-          return res.json({
-            status: 'success',
-            message: 'Handshake Successful! Connected to SellersCampus Gateway core.',
-            raw: data
-          });
-        } else {
-          // Try checking account status as alternative fallback
-          const accountCheck = await fetch(`${cleanEndpoint}/account`, {
-            method: 'GET',
-            headers: {
-              'Authorization': `Bearer ${key}`,
-              'Content-Type': 'application/json',
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-          });
-
-          if (accountCheck.ok) {
-            const accData = await accountCheck.json();
-            return res.json({
-              status: 'success',
-              message: 'Handshake Successful! Verified via SellersCampus account credentials check.',
-              raw: accData
-            });
-          }
-
-          // If the status or account request returned but was not OK, we still fall back to secure success verification
-          // since remote API layouts can change. This ensures sandboxed environments can proceed gracefully!
-          console.log(`[Handshake Alert] SellersCampus returned status non-200, enabling resilient bypass success.`);
-          return res.json({
-            status: 'success',
-            message: 'Handshake Successful! Connection established via verified authorization context (Resilient Fallback Mode).'
-          });
-        }
-      } catch (err: any) {
-        // Safe robust fallback - allows sandbox workflow when central servers are incommunicado
-        console.warn(`[Handshake Warning] Fetch error encountered during handshake verification: ${err.message}. Activating resilient success mode.`);
-        return res.json({
-          status: 'success',
-          message: 'Handshake Successful! Online session token is verified with active POS routing configuration.'
-        });
-      }
-    } catch (err: any) {
-      res.json({
-        status: 'success',
-        message: 'Handshake Successful! Connection established via emergency secure loopback proxy.'
-      });
-    }
-  });
 
   // Simulated WhatsApp states in memory (key: device_id, value: status)
   const simulatedSessions = new Map<string, string>();
@@ -134,8 +66,31 @@ async function startServer() {
   app.post('/api/gateways/whatsapp/connect', async (req: express.Request, res: express.Response) => {
     try {
       const { shopId, endpoint_url, api_key, device_id } = req.body;
-      const cleanEndpoint = (endpoint_url || 'https://app.sellerscampus.com/api/v1').trim().replace(/\/+$/, '');
-      const key = api_key || process.env.ZENDER_MASTER_API_KEY;
+      let cleanEndpoint = (endpoint_url || 'https://app.sellerscampus.com/api/v1').trim().replace(/\/+$/, '');
+      let key = api_key || process.env.ZENDER_MASTER_API_KEY;
+      
+      // Auto-fix if user pasted wa.link URL into the endpoint field
+      if (cleanEndpoint.includes('create/wa.link') || cleanEndpoint.includes('wa.link?secret=') || cleanEndpoint.includes('wa.info?token=')) {
+        if (cleanEndpoint.includes('secret=')) {
+           // extract secret from URL
+           const urlParams = new URLSearchParams(cleanEndpoint.split('?')[1]);
+           if (urlParams.get('secret')) {
+             key = urlParams.get('secret');
+           }
+        }
+        if (cleanEndpoint.includes('token=')) {
+           // extract token from URL
+           const urlParams = new URLSearchParams(cleanEndpoint.split('?')[1]);
+           if (urlParams.get('token')) {
+             key = urlParams.get('token');
+           }
+        }
+        cleanEndpoint = 'https://app.sellerscampus.com/api/v1';
+      }
+
+      if (cleanEndpoint.startsWith('hhttp')) {
+        cleanEndpoint = cleanEndpoint.replace(/^hhttps/, 'https');
+      }
       
       const sessionDeviceId = device_id || `z_wa_${shopId || 'dev'}_${Math.floor(Math.random() * 100000)}`;
 
@@ -183,6 +138,67 @@ async function startServer() {
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Internal Server Error' });
+    }
+  });
+
+  // Phone OTP Generation endpoint for WhatsApp linking
+  app.post('/api/gateways/whatsapp/connect-otp', async (req: express.Request, res: express.Response) => {
+    try {
+      const { phone, token } = req.body;
+      const rawPhone = (phone || '').trim();
+      const cleanToken = (token || '4fe17fcfe73d5035f55b9144fa10e07443659005').trim();
+
+      if (!rawPhone) {
+        return res.status(400).json({ success: false, error: 'Phone number is required' });
+      }
+
+      // Format phone: remove any non-numeric characters e.g. +, - or spaces
+      let cleanPhone = rawPhone.replace(/[^\d]/g, '');
+      
+      // If of length 11 (standard Bangladesh mobile prefix e.g. 017...) we prepend '88' for country code
+      if (cleanPhone.length === 11 && cleanPhone.startsWith('0')) {
+        cleanPhone = '88' + cleanPhone;
+      }
+
+      // We pass secret as specified by the Zender API to resolve the 'Invalid API Endpoint!' error.
+      // Do NOT pass &phone= here because the user wants a QR code payload, not an 8-digit code!
+      const url = `https://app.sellerscampus.com/api/create/wa.link?secret=${cleanToken}`;
+      console.log(`[Zender Link] Requesting QR Code linking string for formatted number: ${cleanPhone} (Raw: ${rawPhone})...`);
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data: any = await response.json();
+        console.log(`[Zender Link Response]`, data);
+
+        // Loose comparison since status could be string or numeric (200), or 'success', or success: true
+        const isSuccess = data.status == 200 || data.status === 'success' || data.success === true || !!data.data;
+        
+        if (isSuccess) {
+          // get the raw qr string from data.data.qrstring
+          const qrStringRaw = data.data?.qrstring || data.qrstring || null;
+          const serverId = data.data?.server_id || data.server_id || null;
+          return res.json({ success: true, qrstring: qrStringRaw, code: (data.code || qrStringRaw), deviceId: serverId });
+        } else {
+          return res.json({ 
+            success: false, 
+            error: data.message || data.error || 'Could not generate code. Make sure the number is valid and has WhatsApp active.' 
+          });
+        }
+      } else {
+        const errorText = await response.text();
+        return res.json({ 
+          success: false, 
+          error: `API Response Fail: ${response.status} - ${errorText.substring(0, 100)}` 
+        });
+      }
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || 'Internal Server Error' });
     }
   });
 
@@ -322,10 +338,31 @@ async function startServer() {
   app.get('/api/gateways/status', async (req: express.Request, res: express.Response) => {
     try {
       const endpoint_url = (req.query.endpoint_url as string) || 'https://app.sellerscampus.com/api/v1';
-      const api_key = (req.query.api_key as string) || '';
+      let api_key = (req.query.api_key as string) || '';
       const device_id = (req.query.device_id as string) || '';
 
-      const cleanEndpoint = endpoint_url.trim().replace(/\/+$/, '');
+      let cleanEndpoint = endpoint_url.trim().replace(/\/+$/, '');
+
+      // Auto-fix if user pasted wa.link or wa.info URL into the endpoint field
+      if (cleanEndpoint.includes('create/wa.link') || cleanEndpoint.includes('wa.link?secret=') || cleanEndpoint.includes('wa.info?token=')) {
+        if (cleanEndpoint.includes('secret=')) {
+           const urlParams = new URLSearchParams(cleanEndpoint.split('?')[1]);
+           if (urlParams.get('secret')) {
+             api_key = urlParams.get('secret') as string;
+           }
+        }
+        if (cleanEndpoint.includes('token=')) {
+           const urlParams = new URLSearchParams(cleanEndpoint.split('?')[1]);
+           if (urlParams.get('token')) {
+             api_key = urlParams.get('token') as string;
+           }
+        }
+        cleanEndpoint = 'https://app.sellerscampus.com/api/v1';
+      }
+
+      if (cleanEndpoint.startsWith('hhttp')) {
+        cleanEndpoint = cleanEndpoint.replace(/^hhttps/, 'https');
+      }
 
       // Check for simulated/sandbox/demo mode
       if (!api_key || !device_id || device_id.startsWith('z_wa_demo_')) {
@@ -334,21 +371,50 @@ async function startServer() {
       }
 
       try {
-        const checkUrl = `${cleanEndpoint}/whatsapp/status/${device_id}`;
+        let checkUrl = `${cleanEndpoint}/whatsapp/status/${device_id}`;
+        let headers: any = {
+          'Authorization': `Bearer ${api_key}`,
+          'Content-Type': 'application/json'
+        };
+
+        // If the device ID happens to be from walink or we sense a specific walink setup
+        if (device_id.startsWith('z_walink_') || api_key.length === 40) { // token/secret is usually 40 chars
+          checkUrl = `https://app.sellerscampus.com/api/get/wa.accounts?secret=${api_key}`;
+          headers = {}; // clear bearer
+        }
+
         console.log(`[Status Sync] GET check Zender status at ${checkUrl}`);
         const response = await fetch(checkUrl, {
           method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${api_key}`,
-            'Content-Type': 'application/json'
-          }
+          headers
         });
 
         if (response.ok) {
           const data: any = await response.json();
-          const isConnected = data.status === 'connected' || data.success === true || data.active === true || data.status === 'active';
-          const finalStatus = isConnected ? 'connected' : 'disconnected';
-          return res.json({ success: true, status: finalStatus, raw: data });
+          let isConnected = false;
+          let realDeviceId = device_id;
+          let phone = '';
+
+          // Handle wa.accounts array response
+          if (data.data && Array.isArray(data.data) && data.data.length > 0) {
+             const activeAccount = data.data.find((acc: any) => acc.status === 'connected' || acc.status === 'active') || data.data[0];
+             if (activeAccount && (activeAccount.status === 'connected' || activeAccount.status === 'active')) {
+                isConnected = true;
+                realDeviceId = activeAccount.unique;
+                phone = activeAccount.phone;
+             }
+          } else {
+            // Adjust for both standard and wa.info structured payloads
+            const allValues = [data.status, data.state, data.data?.status, data.data, data.data?.state];
+            isConnected = allValues.some(val => val === 'connected' || val === 'active' || val === 'REAL_CONNECTED');
+            phone = data.phone || data.data?.phone || '';
+          }
+          
+          if (isConnected) {
+            return res.json({ success: true, status: 'connected', real_device_id: realDeviceId, raw: data, phone: phone });
+          } else {
+            return res.json({ success: true, status: 'disconnected', raw: data });
+          }
         } else {
           return res.json({ success: true, status: 'disconnected', message: `Zender endpoint returned HTTP ${response.status}` });
         }
@@ -358,6 +424,32 @@ async function startServer() {
       }
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Internal check error' });
+    }
+  });
+
+  // 3. Webhook Listener for Live Mobile Disconnect Tracking
+  app.post('/api/gateways/whatsapp/webhook', async (req: express.Request, res: express.Response) => {
+    try {
+      const webhookData = req.body;
+      console.log('[Zender Webhook] Received webhook payload:', JSON.stringify(webhookData));
+      
+      // If WhatsApp mobile device triggered logout/unlink event
+      if (webhookData.event === "device_unlinked" || webhookData.status === "logout" || webhookData.status === "disconnected") {
+        const deviceId = webhookData.device_id || webhookData.id;
+        console.log(`[Zender Webhook] Device disconnected (${deviceId}). Changing session status to Logged Out...`);
+        
+        // Let connected UI clients know via simulate disconnection
+        if (deviceId) {
+           simulatedSessions.set(deviceId, 'disconnected');
+        }
+        
+        // This relies on the POS widget polling for the status, or a WebSocket, but since polling is used, storing it here is good.
+      }
+      
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error('[Zender Webhook] Error:', err.message);
+      res.status(500).json({ error: 'Webhook processing error' });
     }
   });
 
@@ -385,7 +477,10 @@ async function startServer() {
 
         if (response.ok) {
           const data: any = await response.json();
-          const finalStatus = (data.status === 'connected' || data.success === true || data.active === true || data.status === 'active') ? 'connected' : 'disconnected';
+          // Zender typically returns nested data for status or direct status
+          const deviceState = data.data?.status || data.status || data.state;
+          const isConnected = deviceState === 'connected' || deviceState === 'active';
+          const finalStatus = isConnected ? 'connected' : 'disconnected';
           return res.json({ success: true, status: finalStatus, raw: data });
         }
       } catch (err) {
@@ -725,44 +820,86 @@ async function startServer() {
       const invoiceUrl = `https://app.sellerscampus.com/invoice/view/${sale.id || 'live'}`; // simulated dynamic invoice PDF link or web portal
 
       const defaultRoute = gatewayConfig?.default_route || 'manual_redirect';
-      const waDeviceId = gatewayConfig?.zender_whatsapp_device_id || '';
+      let waDeviceId = gatewayConfig?.zender_whatsapp_device_id || '';
       const smsDeviceId = gatewayConfig?.zender_sms_device_id || '';
+      let userSecret = gatewayConfig?.zender_api_key || key;
 
-      console.log(`[POS Dispatch Controller] Initiating automated drop-send. Route: ${defaultRoute}. Recipient: ${recipientPhone}`);
+      let cleanEndpoint = (gatewayConfig?.endpoint_url || 'https://app.sellerscampus.com/api/v1').trim();
+      if (cleanEndpoint.includes('create/wa.link') || cleanEndpoint.includes('wa.link?secret=') || cleanEndpoint.includes('wa.info?token=')) {
+        if (cleanEndpoint.includes('secret=')) {
+           const urlParams = new URLSearchParams(cleanEndpoint.split('?')[1]);
+           if (urlParams.get('secret')) {
+             userSecret = urlParams.get('secret') || userSecret;
+           }
+        }
+        if (cleanEndpoint.includes('token=')) {
+           const urlParams = new URLSearchParams(cleanEndpoint.split('?')[1]);
+           if (urlParams.get('token')) {
+             userSecret = urlParams.get('token') || userSecret;
+           }
+        }
+        cleanEndpoint = 'https://app.sellerscampus.com/api/v1';
+      }
+
+      if (cleanEndpoint.startsWith('hhttp')) {
+        cleanEndpoint = cleanEndpoint.replace(/^hhttps/, 'https');
+      }
+
+      let cleanPhone = recipientPhone.replace(/[^\d+]/g, ''); // leave numbers and +
+      if (cleanPhone.startsWith('+')) cleanPhone = cleanPhone.slice(1);
+      if (cleanPhone.length === 11 && cleanPhone.startsWith('01')) {
+        cleanPhone = '88' + cleanPhone;
+      }
+
+      console.log(`[POS Dispatch Controller] Initiating automated drop-send. Route: ${defaultRoute}. Recipient: ${cleanPhone}`);
 
       if (defaultRoute === 'manual_redirect') {
         return res.json({ success: true, route: 'manual_redirect', note: 'Manual override selected. Front-end will open WhatsApp chat.' });
       }
 
       if (defaultRoute === 'whatsapp') {
-        if (!key || key === 'your_sellerscampus_zender_master_api_key_here') {
-          console.log(`[Simulator WhatsApp Sender] Dispatching invoice #${sale.id} via simulated WhatsApp backend node to ${recipientPhone}`);
+        if (!userSecret || userSecret === 'your_sellerscampus_zender_master_api_key_here') {
+          console.log(`[Simulator WhatsApp Sender] Dispatching invoice #${sale.id} via simulated WhatsApp backend node to ${cleanPhone}`);
           return res.json({ success: true, route: 'whatsapp', simulated: true });
         }
 
         try {
-          const response = await fetch('https://app.sellerscampus.com/api/v1/whatsapp/send', {
+          const params = new URLSearchParams();
+          params.set('secret', userSecret);
+          params.set('account', waDeviceId || '1');
+          params.set('recipient', cleanPhone);
+          params.set('type', 'text');
+          params.set('message', textMessage);
+
+          let baseUrl = cleanEndpoint.replace(/\/api\/.*$/, '');
+          if (baseUrl && !baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
+            baseUrl = 'https://' + baseUrl;
+          }
+          const waSendUrl = baseUrl ? `${baseUrl}/api/send/whatsapp` : `https://app.sellerscampus.com/api/send/whatsapp`;
+
+          console.log(`[Zender WhatsApp] Executing send request to ${waSendUrl}`);
+          const response = await fetch(waSendUrl, {
             method: 'POST',
             headers: {
-              'Authorization': `Bearer ${key}`,
-              'Content-Type': 'application/json'
+              'Content-Type': 'application/x-www-form-urlencoded'
             },
-            body: JSON.stringify({
-              phone: recipientPhone,
-              message: textMessage,
-              media: invoiceUrl
-            })
+            body: params.toString()
           });
 
-          if (response.ok) {
-            const data = await response.json();
+          const data = await response.json();
+          // Relax the status check just in case it returns 200 int or string, or nested sucesss
+          if (response.ok && (data.status === 200 || data.status === 'success' || data.success === true)) {
             return res.json({ success: true, route: 'whatsapp', data });
           } else {
-            const errText = await response.text();
-            throw new Error(`Zender dispatch response fail: ${errText}`);
+            console.log(`[Zender WhatsApp] Delivery rejected by gateway: ${data.message || JSON.stringify(data)}`);
+            return res.status(400).json({
+               success: false,
+               error: data.message || `Delivery rejected by gateway: ${JSON.stringify(data)}`,
+               code: 'WA_GATEWAY_REJECTED'
+            });
           }
         } catch (waErr: any) {
-          console.warn('[Zender WhatsApp Send Exception]', waErr.message);
+          console.log(`[Zender WhatsApp] Dispatch Network Error: ${waErr.message}`);
           return res.status(500).json({ 
             success: false, 
             error: waErr.message || 'WhatsApp Gateway Send Failure', 
@@ -777,33 +914,56 @@ async function startServer() {
         }
 
         if (!key || key === 'your_sellerscampus_zender_master_api_key_here') {
-          console.log(`[Simulator Android SMS Carrier] Sending via device ID: ${smsDeviceId} to ${recipientPhone}`);
+          console.log(`[Simulator Android SMS Carrier] Sending via device ID: ${smsDeviceId} to ${cleanPhone}`);
           return res.json({ success: true, route: 'sms', simulated: true });
         }
 
         try {
-          const response = await fetch('https://app.sellerscampus.com/api/v1/sms/send', {
+          let baseUrl = cleanEndpoint.replace(/\/api\/.*$/, '');
+          if (baseUrl && !baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
+             baseUrl = 'https://' + baseUrl;
+          }
+          const smsSendUrl = baseUrl ? `${baseUrl}/api/send/sms` : `https://app.sellerscampus.com/api/send/sms`;
+
+          const params = new URLSearchParams();
+          params.set('secret', userSecret);
+          params.set('mode', 'devices');
+          params.set('device', smsDeviceId);
+          params.set('sim', '1');
+          params.set('phone', cleanPhone);
+          params.set('message', textMessage);
+
+          const response = await fetch(smsSendUrl, {
             method: 'POST',
             headers: {
-              'Authorization': `Bearer ${key}`,
-              'Content-Type': 'application/json'
+              'Content-Type': 'application/x-www-form-urlencoded'
             },
-            body: JSON.stringify({
-              device: smsDeviceId,
-              phone: recipientPhone,
-              message: textMessage
-            })
+            body: params.toString()
           });
 
           if (response.ok) {
             const data = await response.json();
-            return res.json({ success: true, route: 'sms', data });
+            if (data.status === 200 || data.status === 'success' || data.success === true) {
+              return res.json({ success: true, route: 'sms', data });
+            } else {
+              console.log(`[Zender SMS] Delivery rejected by gateway: ${data.message || JSON.stringify(data)}`);
+              return res.status(400).json({
+                 success: false,
+                 error: data.message || `Delivery rejected by gateway: ${JSON.stringify(data)}`,
+                 code: 'SMS_GATEWAY_REJECTED'
+              });
+            }
           } else {
             const errText = await response.text();
-            throw new Error(`Zender SMS device carrier offline: ${errText}`);
+            console.log(`[Zender SMS] Network response not ok: ${errText}`);
+            return res.status(400).json({
+                 success: false,
+                 error: `Zender SMS device carrier offline: ${errText}`,
+                 code: 'SMS_GATEWAY_REJECTED'
+            });
           }
         } catch (smsErr: any) {
-          console.warn('[Zender SMS Device Carrier Failure]', smsErr.message);
+          console.log(`[Zender SMS] Dispatch Network Error: ${smsErr.message}`);
           return res.status(500).json({ 
             success: false, 
             error: smsErr.message || 'SMS Device Carrier Offline', 

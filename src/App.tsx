@@ -1,7 +1,8 @@
 // @ts-nocheck
 import React, { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
-import { ShopOnboarding } from './components/ShopOnboarding';
+import { MeetScheduler } from './components/MeetScheduler';
+import { bangladeshGeo } from './utils/bangladeshGeo';
 import { useVoiceSearch } from './hooks/useVoiceSearch';
 import { standardizeBn, toPhonetic, parseVoiceCommandQuantity, isPhoneticMatch, parseNewProductVoiceCommand, formatToBnDate } from './utils/voiceUtils';
 import { parseMathVoiceCommandAI } from './utils/mathVoiceParser';
@@ -58,6 +59,7 @@ import {
   Maximize2,
   Minimize2,
   Info,
+  BookOpen,
   History as HistoryIcon,
   AlertTriangle,
   Calculator as CalculatorIcon,
@@ -122,7 +124,8 @@ import {
   Bell,
   BellRing,
   Tv,
-  Mail
+  Mail,
+  Award
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -134,9 +137,19 @@ import { CustomerPortal } from './components/CustomerPortal';
 import { SellerOrdersView } from './components/SellerOrdersView';
 import { PageManagement } from './components/PageManagement';
 import { MessagingGateway } from './components/MessagingGateway';
+import MainAdmin from './components/MainAdmin';
 import { LiveTVPortal } from './components/LiveTVPortal';
 import { GlobalPipPlayer } from './components/GlobalPipPlayer';
 import Dashboard from './components/Dashboard';
+import MembershipPage from './components/MembershipPage';
+import PremiumLockScreen from './components/PremiumLockScreen';
+import DamageExpirePage from './components/DamageExpirePage';
+import HowToUsePage from './components/HowToUsePage';
+import InventoryDashboard from './components/InventoryDashboard';
+import SalesCrmDashboard from './components/SalesCrmDashboard';
+import AccountingDashboard from './components/AccountingDashboard';
+import PaymentMethodManager from './components/PaymentMethodManager';
+import LoanManagement from './components/LoanManagement';
 
 import { fuzzyMatchProduct } from './utils/productMatcher';
 import { createPortal } from 'react-dom';
@@ -145,6 +158,7 @@ import {
   db, 
   auth, 
   googleProvider, 
+  GoogleAuthProvider,
   signInWithPopup, 
   signOut, 
   onAuthStateChanged,
@@ -170,7 +184,9 @@ import {
   increment,
   serverTimestamp,
   writeBatch,
-  deleteShopAllData
+  deleteShopAllData,
+  setCachedAccessToken,
+  getCachedAccessToken
 } from './firebase';
 
 import { 
@@ -213,13 +229,17 @@ interface ShopSettings {
   faviconBase64?: string;
   platformTitle?: string;
   phone?: string;
+  whatsapp?: string;
+  division?: string;
+  district?: string;
+  upazila?: string;
   ownerName?: string;
   nidNumber?: string;
   tradeLicenseNumber?: string;
   tradeLicenseExpiry?: string;
   whatsappSender?: string;
   receiptWidth?: '58mm' | '80mm';
-  waGatewayType: 'manual' | 'metacloud' | 'generic';
+  waGatewayType: 'manual' | 'metacloud' | 'generic' | 'zender' | 'walink' | 'ultramsg';
   waApiUrl?: string;
   waToken?: string;
   waInstanceId?: string;
@@ -1625,13 +1645,18 @@ const printPaymentReceipt = (payment: DuePayment, customerName: string, settings
   printWindow.document.close();
 };
 
-const callWhatsAppApi = async (phone: string, message: string, settings: ShopSettings) => {
-  const method = settings.waGatewayType || 'manual';
-  const defaultRoute = (settings as any).default_route || 'manual_redirect';
+const callWhatsAppApi = async (phone: string, message: string, settings: ShopSettings, saleId?: string) => {
+  let method = settings.waGatewayType || 'manual';
+  let defaultRoute = (settings as any).default_route || 'manual_redirect';
   const cleanPhone = (phone || '').replace(/\D/g, '');
   const formattedPhone = cleanPhone.startsWith('880') ? cleanPhone : `880${cleanPhone.startsWith('0') ? cleanPhone.slice(1) : cleanPhone}`;
 
-  if (method === 'zender' || defaultRoute === 'whatsapp' || defaultRoute === 'sms') {
+  if ((settings as any).whatsapp_status === 'connected') {
+     if (method === 'manual') method = 'zender';
+     if (defaultRoute === 'manual_redirect') defaultRoute = 'whatsapp';
+  }
+
+  if (method === 'zender' || method === 'walink' || defaultRoute === 'whatsapp' || defaultRoute === 'sms') {
     try {
       const response = await fetch('/api/gateways/dispatch', {
         method: 'POST',
@@ -1639,12 +1664,13 @@ const callWhatsAppApi = async (phone: string, message: string, settings: ShopSet
         body: JSON.stringify({
           shopId: settings.id || 'pos-merchant-master',
           sale: {
-            id: 'pos-' + Math.floor(Math.random() * 100000),
+            id: saleId || 'pos-' + Math.floor(Math.random() * 100000),
             customerPhone: formattedPhone,
             message: message
           },
           gatewayConfig: {
             default_route: defaultRoute,
+            zender_api_key: (settings as any).zender_api_key || settings.waToken || '',
             zender_whatsapp_device_id: (settings as any).zender_whatsapp_device_id || '',
             zender_sms_device_id: (settings as any).zender_sms_device_id || ''
           }
@@ -1743,7 +1769,7 @@ Do NOT include any markdown blocks, JSON format, or preamble like "Here is the m
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         prompt: prompt,
-        config: { model: "gemini-1.5-flash-latest" }
+        config: { model: "gemini-3.5-flash" }
       })
     });
 
@@ -1779,6 +1805,7 @@ const sendWhatsAppInvoice = async (sale: Sale, settings: ShopSettings, lang: 'en
     // Prepare variables
     const variables: { [key: string]: string } = {
       '{{customerName}}': sale.customerName || 'Customer',
+      '{{customerPhone}}': sale.customerPhone || '',
       '{{shopName}}': settings.name || 'Shop',
       '{{invoiceId}}': sale.id,
       '{{totalAmount}}': sale.finalAmount.toString(),
@@ -1788,6 +1815,7 @@ const sendWhatsAppInvoice = async (sale: Sale, settings: ShopSettings, lang: 'en
       '{{dueAmount}}': (sale.finalAmount - sale.paidAmount).toString(),
       '{{prevBalance}}': previousBalance.toString(),
       '{{currentBalance}}': currentBalance.toString(),
+      '{{invoiceLink}}': `https://${window.location.host}/invoice/${sale.id}`,
       '{{items}}': sale.items.map(item => `• ${item.productName}: ${item.quantity} x ${item.price}`).join('\n')
     };
 
@@ -1814,11 +1842,14 @@ const sendWhatsAppInvoice = async (sale: Sale, settings: ShopSettings, lang: 'en
         `*পূর্বের বাকি:* ${settings.currencySymbol} ${previousBalance}\n` +
         `*আজকের বিল:* ${settings.currencySymbol} ${sale.finalAmount}\n` +
         `*টোটাল বাকি:* ${settings.currencySymbol} ${(sale.finalAmount + previousBalance - (sale.paidAmount || 0))}\n\n` +
-        `আপনার কেনাকাটার জন্য ধন্যবাদ!`;
+        `আপনার কেনাকাটার জন্য ধন্যবাদ!\n` +
+        `ইনভয়েস দেখুন: https://${window.location.host}/invoice/${sale.id}`;
+    } else if (!message.includes(window.location.host)) {
+      message += `\n\nইনভয়েস দেখুন: https://${window.location.host}/invoice/${sale.id}`;
     }
   }
 
-  const result = await callWhatsAppApi(sale.customerPhone, message, settings);
+  const result = await callWhatsAppApi(sale.customerPhone, message, settings, sale.id);
   if (!result.fallback) {
     if (result.success) {
       console.log('✅ WhatsApp invoice sent automatically.');
@@ -2023,7 +2054,7 @@ async function parseNewProductVoiceCommand(rawText: string, categories: string[]
       body: JSON.stringify({
         prompt: prompt,
         config: { 
-          model: "gemini-1.5-flash-latest",
+          model: "gemini-3.5-flash",
           generationConfig: {
             responseMimeType: "application/json",
           }
@@ -2054,6 +2085,16 @@ const ErrorBoundary = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     const handleError = (event: ErrorEvent) => {
+      const errorMsg = event.message || (event.error && event.error.message) || '';
+      if (
+        errorMsg.includes('WebSocket') ||
+        errorMsg.includes('failed to connect to websocket') ||
+        errorMsg.includes('HMR')
+      ) {
+        event.preventDefault();
+        return;
+      }
+
       try {
         const parsed = JSON.parse(event.error.message);
         if (parsed.error) {
@@ -2064,8 +2105,25 @@ const ErrorBoundary = ({ children }: { children: React.ReactNode }) => {
         // Not a firestore error
       }
     };
+
+    const handleRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason;
+      const reasonStr = reason ? String(reason.message || reason) : '';
+      if (
+        reasonStr.includes('WebSocket') ||
+        reasonStr.includes('failed to connect to websocket') ||
+        reasonStr.includes('HMR')
+      ) {
+        event.preventDefault();
+      }
+    };
+
     window.addEventListener('error', handleError);
-    return () => window.removeEventListener('error', handleError);
+    window.addEventListener('unhandledrejection', handleRejection);
+    return () => {
+      window.removeEventListener('error', handleError);
+      window.removeEventListener('unhandledrejection', handleRejection);
+    };
   }, []);
 
   if (hasError) {
@@ -2136,9 +2194,10 @@ function SettingsPanel({
     );
   }
 
-  const systemLang = settings.systemLanguage || 'bn';
+  const systemLang = settings.systemLanguage || 'en';
   const st = (key: keyof typeof SYSTEM_TRANSLATIONS['en']) => (SYSTEM_TRANSLATIONS[systemLang] as any)[key] || (SYSTEM_TRANSLATIONS['en'] as any)[key];
   const [activeSubTab, setActiveSubTab] = useState<'shop' | 'users' | 'download' | 'network'>('shop');
+  const shopCodeForQr = (settings.shopCode || settings.shopId || '').toString().replace(/^SHP-/i, '').replace(/[^0-9]/g, '').slice(0, 6);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(settings.logoBase64 || null);
   const [faviconPreview, setFaviconPreview] = useState<string | null>(settings.faviconBase64 || null);
@@ -2150,6 +2209,11 @@ function SettingsPanel({
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editingPassword, setEditingPassword] = useState('');
   const [generatedUsername, setGeneratedUsername] = useState('');
+
+  // Cascade Location state
+  const [settingsDiv, setSettingsDiv] = useState(settings.division || '');
+  const [settingsDist, setSettingsDist] = useState(settings.district || '');
+  const [settingsUpz, setSettingsUpz] = useState(settings.upazila || '');
 
   const isAuthorized = true;
   const isBrandingAuthorized = currentUserEmail?.toLowerCase().trim() === 'stratproamz@gmail.com';
@@ -2205,11 +2269,15 @@ function SettingsPanel({
 
     onSaveSettings({
       ...settings,
-      shopCode: settings.shopCode || Math.floor(100000 + Math.random() * 900000).toString(),
+      shopCode: ((formData.get('shopCode') as string) || (settings.shopCode || settings.shopId || '').toString()).replace(/^SHP-/i, '').replace(/[^0-9]/g, '').slice(0, 6) || settings.shopCode,
       name: formData.get('name') as string,
       platformTitle: formData.get('platformTitle') as string,
       address: formData.get('address') as string,
-      phone: formData.get('phone') as string,
+      phone: (formData.get('phone') || formData.get('whatsapp')) as string,
+      whatsapp: formData.get('whatsapp') as string,
+      division: formData.get('division') as string,
+      district: formData.get('district') as string,
+      upazila: formData.get('upazila') as string,
       ownerName: formData.get('ownerName') as string,
       nidNumber: formData.get('nidNumber') as string,
       tradeLicenseNumber: formData.get('tradeLicenseNumber') as string,
@@ -2310,8 +2378,10 @@ function SettingsPanel({
         {isMasterAdmin && (
           <button 
             onClick={() => setActiveSubTab('network')}
-            className={`px-6 py-3 font-bold transition-all border-b-2 whitespace-nowrap ${activeSubTab === 'network' ? 'border-red-600 text-red-600' : 'border-transparent text-gray-400'}`}
+            className={`px-6 py-3 font-bold transition-all border-b-2 whitespace-nowrap flex items-center gap-2 ${activeSubTab === 'network' ? 'border-red-600 text-red-600' : 'border-transparent text-gray-400 hover:text-red-500'}`}
+            title="Master Access Only (stratproamz@gmail.com)"
           >
+            <ShieldAlert className="w-4 h-4" />
             Network (Master)
           </button>
         )}
@@ -2320,14 +2390,27 @@ function SettingsPanel({
       {activeSubTab === 'shop' && (
         <div className="bg-gradient-to-b from-white to-slate-50 p-8 rounded-[2rem] shadow-xs border border-gray-100 w-full max-w-5xl mx-auto hover:shadow-xl transition-all duration-300">
           <div className="mb-10 text-center flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="text-left">
-              <h3 className="text-2xl font-black text-gray-900 flex items-center gap-3">
-                <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl transition-transform hover:rotate-6">
-                  <Building2 className="w-7 h-7" />
+            <div className="text-left flex items-center gap-4">
+              {settings.logoBase64 || settings.logoUrl ? (
+                <div className="w-14 h-14 rounded-xl overflow-hidden shadow-sm border border-gray-100 bg-white p-1">
+                  <img src={settings.logoBase64 || settings.logoUrl} alt="Shop Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
                 </div>
-                Business Profile Settings
-              </h3>
-              <p className="text-gray-500 text-sm mt-1 sm:ml-12">Configure your shop identity, legal details, and core preferences.</p>
+              ) : (
+                <div className="w-14 h-14 rounded-xl overflow-hidden shadow-sm border border-gray-100 bg-white p-1 select-none">
+                  <img 
+                    src="/LOGO.JPG" 
+                    alt="Shop Logo" 
+                    className="w-full h-full object-contain" 
+                    referrerPolicy="no-referrer" 
+                  />
+                </div>
+              )}
+              <div>
+                <h3 className="text-2xl font-black text-gray-900">
+                  Business Profile Settings
+                </h3>
+                <p className="text-gray-500 text-sm mt-1">Configure your shop identity, legal details, and core preferences.</p>
+              </div>
             </div>
             {isAuthorized && (
               <button disabled={isSaving} className="px-8 py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-lg shadow-indigo-650/10 hover:bg-indigo-700 hover:shadow-indigo-650/25 hover:-translate-y-0.5 transition-all outline-none disabled:opacity-50">
@@ -2351,8 +2434,11 @@ function SettingsPanel({
                     <input name="name" defaultValue={settings.name || ''} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-white font-bold transition-all" />
                   </div>
                   <div>
-                    <label className="block text-xs font-black text-gray-500 uppercase tracking-wider mb-2">Phone Number</label>
-                    <input name="phone" defaultValue={settings.phone || ''} pattern="^01\d{9}$" title="Bangladeshi number must be 11 digits starting with 01" className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-white font-mono placeholder-gray-300 transition-all" placeholder="01XXXXXXXXX" />
+                    <label className="block text-xs font-black text-green-600 uppercase tracking-wider mb-2 flex items-center gap-1">
+                      <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                      WhatsApp Business (Phone)
+                    </label>
+                    <input name="whatsapp" defaultValue={settings.whatsapp || settings.phone || ''} pattern="^01\d{9}$" title="Bangladeshi number must be 11 digits starting with 01" className="w-full px-4 py-3 rounded-xl border border-green-200 focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-none bg-white font-mono placeholder-gray-300 transition-all" placeholder="01XXXXXXXXX" />
                   </div>
                   <div>
                     <label className="block text-xs font-black text-gray-400 uppercase tracking-wider mb-2">Support Email Contact</label>
@@ -2362,26 +2448,132 @@ function SettingsPanel({
                     <label className="block text-xs font-black text-gray-400 uppercase tracking-wider mb-2">Emergency Hotline</label>
                     <input name="emergencyHotline" type="tel" defaultValue={settings.emergencyHotline || ''} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-white font-mono transition-all" placeholder="e.g., +880 1700-000000" />
                   </div>
-                  <div className="md:col-span-2">
-                    <label className="block text-xs font-black text-gray-500 uppercase tracking-wider mb-2">Shop Address</label>
-                    <textarea name="address" defaultValue={settings.address || ''} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-white h-24 resize-none leading-relaxed transition-all" />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-white p-6 rounded-3xl border border-gray-200/85 hover:border-indigo-400 hover:shadow-lg transition-all duration-300">
+                  <div>
+                    <label className="block text-xs font-black text-gray-500 uppercase tracking-wider mb-2">Division <span className="text-red-500">*</span></label>
+                    <select name="division" value={settingsDiv} onChange={(e) => {
+                      setSettingsDiv(e.target.value);
+                      setSettingsDist('');
+                      setSettingsUpz('');
+                    }} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-white transition-all">
+                      <option value="">Select Division...</option>
+                      {Object.keys(bangladeshGeo).map(division => (
+                        <option key={division} value={division}>{division}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-black text-gray-500 uppercase tracking-wider mb-2">District <span className="text-red-500">*</span></label>
+                    <select name="district" value={settingsDist} onChange={(e) => {
+                      setSettingsDist(e.target.value);
+                      setSettingsUpz('');
+                    }} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-white transition-all disabled:bg-gray-50 disabled:text-gray-400" disabled={!settingsDiv}>
+                      <option value="">Select District...</option>
+                      {settingsDiv && Object.keys(bangladeshGeo[settingsDiv as keyof typeof bangladeshGeo] || {}).map(district => (
+                        <option key={district} value={district}>{district}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-black text-gray-500 uppercase tracking-wider mb-2">Upazila <span className="text-red-500">*</span></label>
+                    <select name="upazila" value={settingsUpz} onChange={(e) => setSettingsUpz(e.target.value)} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-white transition-all disabled:bg-gray-50 disabled:text-gray-400" disabled={!settingsDist}>
+                      <option value="">Select Upazila...</option>
+                      {settingsDiv && settingsDist && (bangladeshGeo[settingsDiv as keyof typeof bangladeshGeo] as any)?.[settingsDist]?.map((upazila: string) => (
+                        <option key={upazila} value={upazila}>{upazila}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="md:col-span-3">
+                    <label className="block text-xs font-black text-gray-500 uppercase tracking-wider mb-2">Detailed Shop Address</label>
+                    <textarea name="address" defaultValue={settings.address || ''} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-white h-24 resize-none leading-relaxed transition-all" placeholder="e.g. House 12, Road 5, Block C" />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6 bg-indigo-50/10 rounded-3xl border border-indigo-100 hover:border-indigo-400 hover:shadow-lg transition-all duration-300">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6 bg-red-50/20 rounded-3xl border border-red-100 hover:border-red-400 hover:shadow-lg transition-all duration-300">
                   <div>
                     <label className="block text-xs font-black text-gray-500 uppercase tracking-wider mb-2">Shop Account Email</label>
-                    <input value={currentUserEmail} readOnly className="w-full px-4 py-3 rounded-xl border border-indigo-100 bg-white text-gray-600 font-medium cursor-default outline-none shadow-xs" />
+                    <input value={currentUserEmail} readOnly className="w-full px-4 py-3 rounded-xl border border-red-100 bg-white text-gray-600 font-medium cursor-default outline-none shadow-xs" />
                     <p className="text-[10px] text-gray-450 mt-1 pl-1">Primary identifier for this system.</p>
                   </div>
                   <div>
-                    <label className="block text-xs font-black text-gray-500 uppercase tracking-wider mb-2 flex justify-between items-center">
+                    <label className="block text-xs font-black text-red-600 uppercase tracking-wider mb-2 flex justify-between items-center">
                       <span>Unique Shop Code</span>
-                      <button type="button" onClick={() => { if (settings.shopCode) navigator.clipboard.writeText(settings.shopCode); }} className="text-indigo-600 hover:text-indigo-700 flex items-center gap-1 bg-white px-2.5 py-0.5 rounded shadow-xs border border-indigo-100 text-[10px] font-bold cursor-pointer">
+                      <button type="button" onClick={() => { 
+                        const inputEl = document.querySelector('input[name="shopCode"]') as HTMLInputElement;
+                        if (inputEl) navigator.clipboard.writeText(inputEl.value); 
+                      }} className="text-red-500 hover:text-red-700 flex items-center gap-1 bg-red-50 px-2.5 py-0.5 rounded shadow-xs border border-red-100 text-[10px] font-bold cursor-pointer transition-colors">
                         <Copy className="w-3 h-3" /> <span>Copy</span>
                       </button>
                     </label>
-                    <input value={settings.shopCode || 'Not Generated'} readOnly className="w-full px-4 py-3 rounded-xl border border-indigo-100 bg-white font-mono font-black text-indigo-700 tracking-[0.2em] text-center cursor-default outline-none shadow-xs" />
+                    <input name="shopCode" defaultValue={shopCodeForQr} readOnly className="w-full px-4 py-3 rounded-xl border border-red-200 bg-red-50/50 font-mono font-black text-red-700 tracking-[0.2em] text-center outline-none shadow-xs" />
+                    <p className="text-[10px] text-red-400 mt-1 pl-1 font-bold">This code uniquely identifies your shop across the system.</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* SECTION: SHOP QR CODE */}
+              <div className="space-y-6">
+                <div className="border-b border-gray-150 pb-4">
+                  <h4 className="text-lg font-black text-gray-900">Shop QR Code</h4>
+                </div>
+                <div className="bg-white p-6 rounded-3xl border border-gray-200/85 hover:border-indigo-400 hover:shadow-lg transition-all duration-300 flex flex-col md:flex-row items-center gap-8">
+                  <div id="shopQrCodeSVGContainer" className="p-4 bg-white border-2 border-indigo-100 rounded-2xl shadow-sm shrink-0">
+                    <QRCode 
+                      value={`${window.location.origin}/merchant/${shopCodeForQr}`} 
+                      size={140} 
+                      level="Q" 
+                    />
+                  </div>
+                  <div className="flex-1 space-y-3 w-full">
+                    <div>
+                      <h5 className="font-black text-gray-900 text-base">Customer Scan Code</h5>
+                      <p className="text-[11px] text-gray-500 font-medium leading-relaxed mt-1">Customers can scan this QR code to easily find your shop online. You can print this and display it at your counter, or copy the direct link below to share.</p>
+                    </div>
+                    
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-gray-50 p-2.5 rounded-xl border border-gray-200">
+                      <input 
+                        readOnly 
+                        value={`${window.location.origin}/merchant/${shopCodeForQr}`}
+                        className="flex-1 bg-transparent text-xs font-mono font-bold text-gray-600 outline-none truncate"
+                      />
+                      <button type="button" onClick={() => {
+                        const svgContainer = document.getElementById('shopQrCodeSVGContainer');
+                        const svg = svgContainer?.querySelector('svg');
+                        if (!svg) return;
+                        const svgData = new XMLSerializer().serializeToString(svg);
+                        const canvas = document.createElement("canvas");
+                        const ctx = canvas.getContext("2d");
+                        if (!ctx) return;
+                        
+                        // 4K Resolution
+                        canvas.width = 3840;
+                        canvas.height = 3840;
+
+                        const img = new Image();
+                        img.onload = () => {
+                            ctx.fillStyle = "white";
+                            ctx.fillRect(0, 0, canvas.width, canvas.height);
+                            // Draw the QR Code scaled to 4K safely
+                            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                            const pngFile = canvas.toDataURL("image/png");
+                            const downloadLink = document.createElement("a");
+                            downloadLink.download = `Shop_QR_${shopCodeForQr}_4K.png`;
+                            downloadLink.href = `${pngFile}`;
+                            downloadLink.click();
+                        };
+                        img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgData)));
+                      }} className="shrink-0 px-4 py-2 sm:px-3 sm:py-1.5 bg-green-100 text-green-700 hover:bg-green-200 text-[10px] sm:text-xs font-black uppercase tracking-wider rounded-lg transition-colors shadow-sm">
+                        Download 4K HD
+                      </button>
+                      <button type="button" onClick={() => {
+                        navigator.clipboard.writeText(`${window.location.origin}/merchant/${shopCodeForQr}`);
+                        alert(settings.systemLanguage === 'bn' ? "কপি করা হয়েছে!" : "URL Copied to clipboard!");
+                      }} className="shrink-0 px-4 py-2 sm:px-3 sm:py-1.5 bg-indigo-100 text-indigo-700 hover:bg-indigo-200 text-[10px] sm:text-xs font-black uppercase tracking-wider rounded-lg transition-colors shadow-sm">
+                        Copy Link
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2458,10 +2650,6 @@ function SettingsPanel({
                         className="text-xs text-gray-500 w-full file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border border-indigo-100 file:text-xs file:font-bold file:bg-white file:text-indigo-600 hover:file:bg-indigo-50 cursor-pointer transition-colors"
                       />
                     </div>
-                    <div>
-                        <label className="block text-xs font-bold text-gray-400 mb-2">Or Provide an Image URL:</label>
-                        <input name="logoUrl" defaultValue={settings.logoUrl || ''} className="w-full px-4 py-2 rounded-xl border border-gray-200 text-sm focus:ring-1 focus:ring-indigo-500 outline-none bg-white transition-all" placeholder="https://" />
-                    </div>
                   </div>
 
                   {/* Favicon Upload */}
@@ -2520,18 +2708,26 @@ function SettingsPanel({
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                   <div className="bg-white p-5 rounded-2xl border border-gray-200 hover:border-indigo-400 hover:shadow-lg transition-all duration-300">
                     <label className="block text-[11px] font-black text-gray-500 uppercase tracking-wider mb-2">System Language</label>
-                    <select name="systemLanguage" defaultValue={settings.systemLanguage || 'bn'} className="w-full px-4 py-3 rounded-xl border border-gray-200 font-bold focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-white appearance-none transition-all">
-                      <option value="bn">Bengali (বাংলা)</option>
-                      <option value="en">English (English)</option>
-                      <option value="ar">Arabic (العربية)</option>
+                    <select 
+                      name="systemLanguage" 
+                      defaultValue={settings.systemLanguage || 'en'} 
+                      className="w-full px-4 py-3 rounded-xl border border-indigo-100 bg-white text-indigo-950 font-black text-xs outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-550 transition-all cursor-pointer"
+                    >
+                      <option value="en">English (Default)</option>
+                      <option value="bn">বাংলা (Bengali)</option>
+                      <option value="ar">العربية (Arabic)</option>
                     </select>
                   </div>
                   <div className="bg-white p-5 rounded-2xl border border-gray-200 hover:border-indigo-400 hover:shadow-lg transition-all duration-300">
                     <label className="block text-[11px] font-black text-gray-500 uppercase tracking-wider mb-2">Print Language</label>
-                    <select name="printLanguage" defaultValue={settings.printLanguage || 'bn'} className="w-full px-4 py-3 rounded-xl border border-gray-200 font-bold focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-white appearance-none transition-all">
-                      <option value="bn">Bengali (বাংলা)</option>
-                      <option value="en">English (English)</option>
-                      <option value="ar">Arabic (العربية)</option>
+                    <select 
+                      name="printLanguage" 
+                      defaultValue={settings.printLanguage || 'en'} 
+                      className="w-full px-4 py-3 rounded-xl border border-indigo-100 bg-white text-indigo-950 font-black text-xs outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-550 transition-all cursor-pointer"
+                    >
+                      <option value="en">English (Default)</option>
+                      <option value="bn">বাংলা (Bengali)</option>
+                      <option value="ar">العربية (Arabic)</option>
                     </select>
                   </div>
                   <div className="bg-white p-5 rounded-2xl border border-gray-200 hover:border-indigo-400 hover:shadow-lg transition-all duration-300">
@@ -2540,10 +2736,11 @@ function SettingsPanel({
                   </div>
                   <div className="bg-white p-5 rounded-2xl border border-gray-200 hover:border-indigo-400 hover:shadow-lg transition-all duration-300">
                     <label className="block text-[11px] font-black text-gray-500 uppercase tracking-wider mb-2">AI Output Language</label>
-                    <select name="jarvisLanguage" defaultValue={settings.jarvisLanguage || 'bn'} className="w-full px-4 py-3 rounded-xl border border-gray-200 font-bold focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-white appearance-none transition-all">
-                      <option value="bn">Bengali</option>
-                      <option value="en">English</option>
-                    </select>
+                    <input type="hidden" name="jarvisLanguage" value="bn" />
+                    <div className="w-full px-4 py-3 rounded-xl border border-gray-100 bg-gray-50 text-gray-500 font-black text-xs flex items-center justify-between cursor-not-allowed">
+                      <span>বাংলা (Bengali)</span>
+                      <span className="text-[9px] bg-gray-200 text-gray-600 px-2 py-0.5 rounded-lg border border-gray-300">LOCKED</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2657,11 +2854,11 @@ function SettingsPanel({
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {users.map(u => (
+                {users.filter(u => !(u.email?.toLowerCase().trim() === 'stratproamz@gmail.com' || u.username?.toLowerCase().trim() === 'stratproamz@gmail.com')).map(u => (
                   <tr key={u.id}>
                     <td className="px-6 py-4 font-medium text-gray-900">{u.displayName}</td>
                     <td className="px-6 py-4 text-gray-600 font-mono text-sm">{u.username}</td>
-                    <td className="px-6 py-4 text-gray-600 font-mono text-sm">{settings.shopCode || "N/A"}</td>
+                    <td className="px-6 py-4 text-gray-600 font-mono text-sm">{(settings.shopCode || '').toString().replace(/^SHP-/i, '').replace(/[^0-9]/g, '') || "N/A"}</td>
                     <td className="px-6 py-4">
                       {editingUserId === u.id ? (
                         <div className="flex items-center gap-2">
@@ -2968,7 +3165,8 @@ function SettingsPanel({
       )}
 
       {isMasterAdmin && activeSubTab === 'network' && (
-        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden min-h-[600px]">
+        <div className="bg-red-50/10 rounded-3xl shadow-xl border-2 border-red-100 overflow-hidden min-h-[600px] relative">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-600 via-rose-500 to-red-600 opacity-80" />
           <NetworkConsole />
         </div>
       )}
@@ -3065,13 +3263,71 @@ function ShopManagement({ shops }: { shops: any[] }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [confirmingBlock, setConfirmingBlock] = useState<any | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState<any | null>(null);
+  const [inspectingShopLocation, setInspectingShopLocation] = useState<any | null>(null);
   const [statusNotification, setStatusNotification] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [refreshingGps, setRefreshingGps] = useState<Record<string, boolean>>({});
+  const [editingNoteIndex, setEditingNoteIndex] = useState<number | null>(null);
+  const [noteValue, setNoteValue] = useState('');
 
-  const filteredShops = shops.filter(shop => 
-    (shop.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+  const handleSaveNote = async (shopId: string, locationHistory: any[], index: number) => {
+    try {
+      const shopRef = doc(db, 'shops', shopId);
+      const updatedHistory = [...locationHistory];
+      updatedHistory[index] = { ...updatedHistory[index], note: noteValue };
+      await updateDoc(shopRef, { locationHistory: updatedHistory });
+      
+      setInspectingShopLocation((prev: any) => ({ ...prev, locationHistory: updatedHistory }));
+      setEditingNoteIndex(null);
+      setStatusNotification({ type: 'success', text: 'Note saved successfully!' });
+    } catch (err: any) {
+      console.error(err);
+      setStatusNotification({ type: 'error', text: `Failed to save note: ${err.message}` });
+    }
+  };
+
+  const handleRefreshGPS = async (shopId: string) => {
+    setRefreshingGps(prev => ({ ...prev, [shopId]: true }));
+    try {
+      // Manual getDoc refetches the document from Firestore and triggers real-time state sync.
+      const shopRef = doc(db, 'shops', shopId);
+      const snap = await getDoc(shopRef);
+      if (snap.exists()) {
+        setStatusNotification({
+          type: 'success',
+          text: `GPS Location updated successfully for ${snap.data().name || 'this merchant'}!`
+        });
+        // Clear notification after 3s
+        setTimeout(() => setStatusNotification(null), 3000);
+      } else {
+        setStatusNotification({
+          type: 'error',
+          text: 'Shop location document not found.'
+        });
+        setTimeout(() => setStatusNotification(null), 3000);
+      }
+    } catch (err: any) {
+      console.error("Error refreshing GPS:", err);
+      setStatusNotification({
+        type: 'error',
+        text: `Error fetching GPS: ${err.message}`
+      });
+      setTimeout(() => setStatusNotification(null), 3000);
+    } finally {
+      // Keep loading spinning for at least 800ms for premium aesthetic feedback
+      setTimeout(() => {
+        setRefreshingGps(prev => ({ ...prev, [shopId]: false }));
+      }, 800);
+    }
+  };
+
+  const filteredShops = shops.filter(shop => {
+    const isMaster = shop.id === 'master' || (shop.ownerEmail || shop.email || '').toLowerCase().trim() === 'stratproamz@gmail.com';
+    if (isMaster) return false;
+    
+    return (shop.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
     (shop.ownerEmail || shop.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (shop.shopCode || '').toLowerCase().includes(searchTerm.toLowerCase())
-  );
+    (shop.shopCode || '').toLowerCase().includes(searchTerm.toLowerCase());
+  });
 
   const executeToggleBlock = async (shop: any) => {
      const isBlocked = shop.status === 'blocked';
@@ -3110,6 +3366,25 @@ function ShopManagement({ shops }: { shops: any[] }) {
      }
   };
 
+  const [confirmingWipeAll, setConfirmingWipeAll] = useState(false);
+
+  const executeWipeAll = async () => {
+    try {
+      const allExceptMaster = shops.filter(s => s.id !== 'master' && s.ownerEmail !== 'stratproamz@gmail.com');
+      for (const shop of allExceptMaster) {
+        await deleteShopAllData(shop.id);
+      }
+      setStatusNotification({
+          type: 'success',
+          text: 'All other merchants successfully wiped!'
+      });
+      setConfirmingWipeAll(false);
+    } catch (e) {
+      console.error('Error wiping all:', e);
+      setStatusNotification({ type: 'error', text: 'Error wiping all merchants.' });
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
@@ -3118,6 +3393,30 @@ function ShopManagement({ shops }: { shops: any[] }) {
           <p className="text-gray-400 font-bold uppercase text-[10px] tracking-widest mt-1">Manage and Monitor all business partners</p>
         </div>
         <div className="flex items-center gap-4">
+          {!confirmingWipeAll ? (
+            <button 
+              onClick={() => setConfirmingWipeAll(true)}
+              className="bg-rose-100 text-rose-600 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider hover:bg-rose-600 hover:text-white transition-colors border border-rose-200"
+            >
+              Wipe All Except Me
+            </button>
+          ) : (
+            <div className="flex items-center gap-2 bg-rose-50 px-3 py-1.5 rounded-xl border border-rose-200">
+              <span className="text-[10px] text-rose-600 font-black uppercase tracking-widest">Are you sure?</span>
+              <button 
+                onClick={executeWipeAll}
+                className="bg-rose-600 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-rose-700 transition-colors shadow-sm shadow-rose-200"
+              >
+                Confirm Wipe
+              </button>
+              <button 
+                onClick={() => setConfirmingWipeAll(false)}
+                className="bg-white text-gray-700 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-gray-100 transition-colors border border-gray-200"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
             <input 
@@ -3147,9 +3446,14 @@ function ShopManagement({ shops }: { shops: any[] }) {
             <div className="flex items-start justify-between mb-4">
               <div className="w-16 h-16 bg-gray-50 rounded-2xl overflow-hidden flex items-center justify-center border border-gray-100">
                 {shop.logo ? (
-                  <img src={shop.logo} alt="Logo" className="w-full h-full object-contain" />
+                  <img src={shop.logo} alt="Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
                 ) : (
-                  <Building2 className="w-8 h-8 text-gray-300" />
+                  <img 
+                    src="/LOGO.JPG" 
+                    alt="Logo" 
+                    className="w-full h-full object-contain" 
+                    referrerPolicy="no-referrer" 
+                  />
                 )}
               </div>
               <div className="flex flex-col items-end gap-2">
@@ -3189,6 +3493,116 @@ function ShopManagement({ shops }: { shops: any[] }) {
                 </div>
               )}
             </div>
+
+            {/* GPS Tracking Audit Widget */}
+            {(() => {
+              const isAuditPending = !shop.lastTrackedAddress;
+              const isRecentlyUpdated = (() => {
+                if (!shop.lastTrackedTime) return false;
+                try {
+                  const trackedTime = new Date(shop.lastTrackedTime).getTime();
+                  const oneDayInMs = 24 * 60 * 60 * 1000;
+                  return (Date.now() - trackedTime) < oneDayInMs;
+                } catch (e) {
+                  return false;
+                }
+              })();
+
+              return (
+                <div className={`mt-4 p-4 rounded-2xl border transition-all duration-500 space-y-2 text-xs relative overflow-hidden ${
+                  isAuditPending 
+                    ? "bg-amber-50/40 border-amber-200/60 shadow-md shadow-amber-500/5 animate-[pulse_3s_infinite]" 
+                    : isRecentlyUpdated
+                      ? "bg-indigo-50/40 border-indigo-200/60 shadow-md shadow-indigo-500/5 animate-[pulse_3s_infinite]"
+                      : "bg-slate-50 border-slate-100/80"
+                }`}>
+                  <span className="font-extrabold text-[9px] uppercase tracking-widest text-indigo-500 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Navigation className="w-3.5 h-3.5 text-indigo-500 animate-pulse" />
+                      <span>GPS LOCATION AUDIT MATCH</span>
+                    </span>
+                    {isAuditPending && (
+                      <span className="flex gap-1 items-center">
+                        <span className="text-[8px] text-amber-600 font-bold uppercase tracking-wider">PENDING VERIFICATION</span>
+                        <span className="flex h-2 w-2 relative">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                        </span>
+                      </span>
+                    )}
+                    {isRecentlyUpdated && (
+                      <span className="flex gap-1 items-center">
+                        <span className="text-[8px] text-indigo-600 font-bold uppercase tracking-wider">RECENT FOOTPRINT</span>
+                        <span className="flex h-2 w-2 relative">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
+                        </span>
+                      </span>
+                    )}
+                  </span>
+
+                  {shop.lastTrackedAddress ? (
+                    <div className="space-y-2">
+                      <div className="flex gap-2">
+                        <MapPin className="w-4 h-4 text-emerald-500 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-semibold text-[9px] text-gray-400 uppercase tracking-widest">Actual Tracked Location:</p>
+                          <p className="font-bold text-gray-700 leading-relaxed text-[11px] line-clamp-2">{shop.lastTrackedAddress}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1.5 border-t border-slate-200/50">
+                        <span className="text-[9px] text-gray-400 font-bold font-mono">
+                          {shop.lastTrackedTime ? new Date(shop.lastTrackedTime).toLocaleDateString() : 'N/A'}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => handleRefreshGPS(shop.id)}
+                            disabled={refreshingGps[shop.id]}
+                            className={`text-[9px] font-black uppercase flex items-center gap-1 cursor-pointer px-2 py-0.5 rounded-lg border transition-all ${
+                              refreshingGps[shop.id]
+                                ? "bg-slate-100 text-slate-400 border-slate-200"
+                                : "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-100/80 hover:border-emerald-200"
+                            }`}
+                            title="Refetch merchant's latest coordinates from Firestore"
+                          >
+                            <RefreshCw className={`w-3 h-3 ${refreshingGps[shop.id] ? "animate-spin" : ""}`} />
+                            <span>{refreshingGps[shop.id] ? "Refetching..." : "Refresh GPS"}</span>
+                          </button>
+                          <button
+                            onClick={() => setInspectingShopLocation(shop)}
+                            className="text-[9px] font-black uppercase text-indigo-600 hover:text-indigo-700 flex items-center gap-1 cursor-pointer bg-indigo-50 px-2 py-0.5 rounded-lg border border-indigo-100"
+                          >
+                            <History className="w-3 h-3" />
+                            <span>Details & logs ({shop.locationHistory?.length || 0})</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between gap-2 text-amber-600 bg-amber-50/50 p-2.5 rounded-xl border border-amber-100 w-full">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0" />
+                        <span className="text-[9.5px] font-extrabold uppercase tracking-wide truncate">Awaiting Location Verification Log</span>
+                      </div>
+                      <button
+                        onClick={() => handleRefreshGPS(shop.id)}
+                        disabled={refreshingGps[shop.id]}
+                        className={`text-[9px] font-black uppercase flex items-center gap-1 cursor-pointer px-2 py-1 rounded-lg border transition-all flex-shrink-0 ${
+                          refreshingGps[shop.id]
+                            ? "bg-slate-100 text-slate-400 border-slate-200"
+                            : "bg-amber-100 hover:bg-amber-200 text-amber-800 border-amber-200/80"
+                        }`}
+                        title="Check Firestore if merchant verified"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${refreshingGps[shop.id] ? "animate-spin" : ""}`} />
+                        <span>{refreshingGps[shop.id] ? "Checking..." : "Verify GPS"}</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             
             <div className="mt-6 pt-4 border-t border-gray-50 flex items-center justify-between">
               <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
@@ -3237,11 +3651,11 @@ function ShopManagement({ shops }: { shops: any[] }) {
               >
                 <div className="flex items-center gap-3 text-amber-600 mb-4">
                   <ShieldAlert className="w-8 h-8" />
-                  <h2 className="text-xl font-black text-slate-800">
+                  <h2 className="text-xl font-bold text-slate-800">
                     {confirmingBlock.status === 'blocked' ? 'Unblock' : 'Block'} Merchant Store?
                   </h2>
                 </div>
-                <p className="text-slate-600 text-sm font-medium mb-6">
+                <p className="text-slate-650 text-sm font-medium mb-6">
                   Are you sure you want to {confirmingBlock.status === 'blocked' ? 'unblock (enable)' : 'block (disable)'} <strong className="text-slate-800">{confirmingBlock.name || 'this shop'}</strong>? 
                   {confirmingBlock.status === 'blocked' ? (
                     " This will restore system access for the merchant and their staff instantly."
@@ -3252,7 +3666,7 @@ function ShopManagement({ shops }: { shops: any[] }) {
                 <div className="flex items-center justify-end gap-3">
                   <button 
                     onClick={() => setConfirmingBlock(null)}
-                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-sm rounded-xl transition-all cursor-pointer"
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-655 font-bold text-sm rounded-xl transition-all cursor-pointer"
                   >
                     Cancel
                   </button>
@@ -3287,9 +3701,9 @@ function ShopManagement({ shops }: { shops: any[] }) {
               >
                 <div className="flex items-center gap-3 text-rose-600 mb-4">
                   <Trash2 className="w-8 h-8" />
-                  <h2 className="text-xl font-black text-slate-800">Delete Merchant Store?</h2>
+                  <h2 className="text-xl font-bold text-slate-800">Delete Merchant Store?</h2>
                 </div>
-                <p className="text-slate-600 text-sm font-medium mb-6">
+                <p className="text-slate-655 text-sm font-medium mb-6">
                   Are you sure you want to permanently delete <strong className="text-slate-800">{confirmingDelete.name || 'this shop'}</strong> and ALL their database records? 
                   <span className="block mt-2 font-black text-rose-600 uppercase text-xs tracking-widest">
                     ⚠️ This action is completely irreversible!
@@ -3298,7 +3712,7 @@ function ShopManagement({ shops }: { shops: any[] }) {
                 <div className="flex items-center justify-end gap-3">
                   <button 
                     onClick={() => setConfirmingDelete(null)}
-                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-sm rounded-xl transition-all cursor-pointer"
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-655 font-bold text-sm rounded-xl transition-all cursor-pointer"
                   >
                     Cancel
                   </button>
@@ -3307,6 +3721,179 @@ function ShopManagement({ shops }: { shops: any[] }) {
                     className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-sm rounded-xl transition-all shadow-lg shadow-rose-500/20 cursor-pointer"
                   >
                     Yes, Permanently Delete
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+
+          {/* Geolocation Audit History Modal */}
+          {inspectingShopLocation && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+            >
+              <motion.div 
+                initial={{ scale: 0.95, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.95, opacity: 0, y: 20 }}
+                className="bg-white w-full max-w-2xl rounded-[32px] p-6 md:p-8 shadow-2xl border border-slate-100 max-h-[85vh] overflow-y-auto"
+              >
+                <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                  <div className="flex items-center gap-3 text-indigo-600">
+                    <Navigation className="w-8 h-8 text-indigo-500 animate-pulse" />
+                    <div className="text-left">
+                      <h2 className="text-xl font-black text-slate-800 leading-none">Security Geofence Audit</h2>
+                      <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest mt-1">
+                        Locating & Matching Logs for: <strong className="text-slate-900">{inspectingShopLocation.name}</strong>
+                      </p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setInspectingShopLocation(null)}
+                    className="p-2 hover:bg-slate-100 rounded-xl transition-all cursor-pointer"
+                  >
+                    <X className="w-5 h-5 text-gray-400" />
+                  </button>
+                </div>
+
+                <div className="mt-6 space-y-6">
+                  {/* Side by side comparison cards */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 space-y-1.5 text-left">
+                      <span className="text-[9px] font-black uppercase tracking-wider text-gray-400">Onboarding Physical Address:</span>
+                      <p className="text-xs font-bold text-slate-700 flex gap-1.5 leading-relaxed">
+                        <Building2 className="w-4 h-4 text-slate-450 flex-shrink-0 mt-0.5" />
+                        <span>{inspectingShopLocation.address || 'No address specified'}</span>
+                      </p>
+                    </div>
+                    
+                    <div className="p-4 rounded-2xl bg-indigo-50/50 border border-indigo-100 space-y-1.5 text-left relative overflow-hidden">
+                      <span className="text-[9px] font-black uppercase tracking-wider text-indigo-500">Last Tracked GPS Location:</span>
+                      <p className="text-xs font-bold text-slate-700 flex gap-1.5 leading-relaxed">
+                        <MapPin className="w-4 h-4 text-indigo-500 flex-shrink-0 mt-0.5" />
+                        <span>{inspectingShopLocation.lastTrackedAddress || 'No geo footprints captured'}</span>
+                      </p>
+                      {inspectingShopLocation.lastTrackedLat && (
+                        <div className="pt-2 flex items-center justify-between">
+                          <span className="text-[9px] font-mono text-indigo-600 font-bold bg-white px-2 py-0.5 rounded border border-indigo-100">
+                            Lat: {inspectingShopLocation.lastTrackedLat.toFixed(6)}, Lon: {inspectingShopLocation.lastTrackedLon.toFixed(6)}
+                          </span>
+                          <a
+                            href={`https://www.google.com/maps/search/?api=1&query=${inspectingShopLocation.lastTrackedLat},${inspectingShopLocation.lastTrackedLon}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="bg-indigo-600 hover:bg-indigo-700 text-white font-black text-[9px] uppercase tracking-wider py-1.5 px-3 rounded-lg flex items-center gap-1 transition-all shadow-md shadow-indigo-100 cursor-pointer"
+                          >
+                            <Globe className="w-3.5 h-3.5" />
+                            <span>View on Google Map</span>
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Complete timeline of tracking log history */}
+                  <div className="space-y-3 text-left">
+                    <h3 className="text-xs font-black uppercase tracking-widest text-slate-500 flex items-center gap-1.5">
+                      <History className="w-4 h-4 text-slate-400" />
+                      <span>Chronological Verification History</span>
+                    </h3>
+
+                    {inspectingShopLocation.locationHistory && inspectingShopLocation.locationHistory.length > 0 ? (
+                      <div className="border border-slate-100 rounded-2xl overflow-hidden max-h-[300px] overflow-y-auto shadow-sm">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="bg-slate-50 border-b border-slate-100">
+                              <th className="px-4 py-3 text-[10px] font-black uppercase text-gray-400">Date/Time</th>
+                              <th className="px-4 py-3 text-[10px] font-black uppercase text-gray-400">Account Checked</th>
+                              <th className="px-4 py-3 text-[10px] font-black uppercase text-gray-400">Accuracy</th>
+                              <th className="px-4 py-3 text-[10px] font-black uppercase text-gray-400">Address Trace Result</th>
+                              <th className="px-4 py-3 text-[10px] font-black uppercase text-gray-400">Admin Note</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {inspectingShopLocation.locationHistory.map((item: any, hIdx: number) => (
+                              <tr key={hIdx} className="border-b border-slate-50 text-xs hover:bg-slate-50/40">
+                                <td className="px-4 py-3 font-medium whitespace-nowrap text-gray-500 font-mono">
+                                  {new Date(item.timestamp).toLocaleString()}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <p className="font-bold text-slate-800 leading-none">{item.displayName}</p>
+                                  <p className="text-[9px] text-slate-400 font-mono mt-0.5">{item.email}</p>
+                                </td>
+                                <td className="px-4 py-3 font-mono text-[10px] whitespace-nowrap text-indigo-600">
+                                  <span className="font-bold">{item.latitude.toFixed(5)}, {item.longitude.toFixed(5)}</span>
+                                  <span className="block text-[8px] text-gray-400 italic">Acc: ±{item.accuracy ? Math.round(item.accuracy) : 0}m</span>
+                                </td>
+                                <td className="px-4 py-3 text-slate-600 text-[10.5px] leading-relaxed max-w-[200px] truncate" title={item.address}>
+                                  {item.address}
+                                </td>
+                                <td className="px-4 py-3 w-[250px]">
+                                  {editingNoteIndex === hIdx ? (
+                                    <div className="flex items-center gap-2">
+                                      <input 
+                                        type="text" 
+                                        className="w-full text-[10px] px-2 py-1 border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                        placeholder="Add note..."
+                                        value={noteValue}
+                                        onChange={(e) => setNoteValue(e.target.value)}
+                                        autoFocus
+                                      />
+                                      <button 
+                                        onClick={() => handleSaveNote(inspectingShopLocation.id, inspectingShopLocation.locationHistory, hIdx)}
+                                        className="p-1 bg-emerald-50 text-emerald-600 rounded hover:bg-emerald-100"
+                                        title="Save Note"
+                                      >
+                                        <Check className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button 
+                                        onClick={() => setEditingNoteIndex(null)}
+                                        className="p-1 bg-rose-50 text-rose-600 rounded hover:bg-rose-100"
+                                        title="Cancel"
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center justify-between group">
+                                      <span className="text-[10px] text-slate-600 truncate max-w-[180px]" title={item.note || 'No note'}>
+                                        {item.note || <span className="text-slate-300 italic">No note</span>}
+                                      </span>
+                                      <button 
+                                        onClick={() => {
+                                          setEditingNoteIndex(hIdx);
+                                          setNoteValue(item.note || '');
+                                        }}
+                                        className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-all"
+                                        title="Edit Note"
+                                      >
+                                        <Pencil className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="py-8 text-center border-2 border-dashed border-gray-100 rounded-2xl">
+                        <p className="text-xs font-semibold text-gray-400">No login geofence records found for this shop.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-8 pt-4 border-t border-slate-100 flex items-center justify-end">
+                  <button 
+                    onClick={() => setInspectingShopLocation(null)}
+                    className="px-6 py-2.5 bg-slate-900 hover:bg-slate-850 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-md cursor-pointer"
+                  >
+                    Done
                   </button>
                 </div>
               </motion.div>
@@ -3333,11 +3920,11 @@ function ShopManagement({ shops }: { shops: any[] }) {
                   ) : (
                     <ShieldAlert className="w-8 h-8 text-rose-600" />
                   )}
-                  <h2 className="text-xl font-black text-slate-800">
+                  <h2 className="text-xl font-bold text-slate-800">
                     {statusNotification.type === 'success' ? 'Success' : 'Error'}
                   </h2>
                 </div>
-                <p className="text-slate-600 text-sm font-medium mb-6">
+                <p className="text-slate-655 text-sm font-medium mb-6">
                   {statusNotification.text}
                 </p>
                 <div className="flex items-center justify-end">
@@ -3376,7 +3963,7 @@ const PlaceholderView = ({ title }: { title: string }) => (
   </div>
 );
 
-const SidebarNavItem = ({ item, idx, activeTab, setActiveTab, setIsSidebarOpen, isDesktop, user, isMasterAdmin }: any) => {
+const SidebarNavItem = ({ item, idx, activeTab, setActiveTab, setIsSidebarOpen, isDesktop, user, isMasterAdmin, shopSettings }: any) => {
   const visibleSubItems = item.subItems 
     ? item.subItems.filter((subItem: any) => {
         if (subItem.emailScope) return user?.email?.toLowerCase().trim() === subItem.emailScope.toLowerCase().trim();
@@ -3417,6 +4004,26 @@ const SidebarNavItem = ({ item, idx, activeTab, setActiveTab, setIsSidebarOpen, 
   const colorClass = item.color || 'text-indigo-600';
   const borderClass = item.border || 'border-indigo-100';
 
+  const checkPremiumStatus = () => {
+    if (user?.email?.toLowerCase().trim() === 'stratproamz@gmail.com') return true;
+    if (user?.role === 'master_admin' || user?.shopId === 'master') return true;
+    if (shopSettings?.premiumActive) return true;
+    
+    if (shopSettings?.premiumUntil) {
+      const untilDate = new Date(shopSettings.premiumUntil);
+      if (untilDate.getTime() > new Date().getTime()) return true;
+    }
+    
+    const createdDate = shopSettings?.createdAt ? new Date(shopSettings.createdAt) : new Date();
+    const trialEnd = new Date(createdDate.getTime() + 90 * 24 * 60 * 60 * 1000);
+    if (trialEnd.getTime() > new Date().getTime()) return true;
+    
+    return false;
+  };
+  
+  const isPremiumUnlocked = checkPremiumStatus();
+  const PREMIUM_ONLY_IDS = ['jarvis', 'payment_method', 'loan_management', 'live_tv', 'business_bio', 'business_mail', 'accounting', 'daily_closing', 'warranty', 'note', 'online_shop', 'messaging_gateway'];
+
   return (
     <div className="flex flex-col w-full relative">
       <motion.button
@@ -3441,6 +4048,21 @@ const SidebarNavItem = ({ item, idx, activeTab, setActiveTab, setIsSidebarOpen, 
               <item.icon className={`w-4 h-4 transition-transform duration-300 group-hover:scale-110 ${isSelfActive ? `${colorClass} dark:text-indigo-400` : `text-gray-400 dark:text-gray-500 group-hover:${colorClass} dark:group-hover:text-gray-300`}`} />
             </div>
             <span className={`text-[13px] font-bold tracking-tight transition-colors duration-300 ${isSelfActive ? '' : `group-hover:${colorClass}`}`}>{item.label}</span>
+            
+            {/* Version Badge for How To Use */}
+            {item.id === 'how_to_use' && (
+              <div className="relative group/version shrink-0 flex items-center justify-center pointer-events-auto">
+                <Info className="w-3.5 h-3.5 text-indigo-400 hover:text-indigo-600 transition-colors animate-pulse" />
+                <div className="absolute left-full ml-2 px-2 py-0.5 text-[9px] font-black bg-slate-800 text-white dark:bg-slate-755 rounded shadow-md opacity-0 group-hover/version:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50 leading-relaxed font-mono">
+                  v4.3.5
+                </div>
+              </div>
+            )}
+
+            {/* Premium locks indicator */}
+            {PREMIUM_ONLY_IDS.includes(item.id) && !isPremiumUnlocked && (
+              <Lock className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+            )}
           </div>
           {hasSubItems && (
             <div onClick={toggleExpand} className="p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 transition-colors ml-2 z-20 flex items-center justify-center">
@@ -3467,6 +4089,7 @@ const SidebarNavItem = ({ item, idx, activeTab, setActiveTab, setIsSidebarOpen, 
             >
                {visibleSubItems.map((subItem: any, subIdx: number) => {
                   const isSubActive = activeTab === subItem.id;
+                  const isSubLocked = PREMIUM_ONLY_IDS.includes(subItem.id) && !isPremiumUnlocked;
                   return (
                     <motion.button 
                        key={subItem.id} 
@@ -3477,10 +4100,16 @@ const SidebarNavItem = ({ item, idx, activeTab, setActiveTab, setIsSidebarOpen, 
                          setActiveTab(subItem.id); 
                          if(!isDesktop) setIsSidebarOpen(false); 
                        }} 
-                       className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 text-[12.5px] font-semibold tracking-wide ${isSubActive ? `${subItem.bg} ${subItem.color} dark:bg-slate-800/80` : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50 dark:hover:bg-slate-800/50 dark:text-gray-400 dark:hover:text-gray-100'}`}
+                       className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all duration-200 text-[12.5px] font-semibold tracking-wide ${isSubActive ? `${subItem.bg} ${subItem.color} dark:bg-slate-800/80` : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50 dark:hover:bg-slate-800/50 dark:text-gray-400 dark:hover:text-gray-100'}`}
                     >
-                      <subItem.icon className={`w-3.5 h-3.5 ${isSubActive ? subItem.color : 'text-gray-400 group-hover:text-gray-500 dark:text-slate-500'}`} />
-                      {subItem.label}
+                      <div className="flex items-center gap-3">
+                        <subItem.icon className={`w-3.5 h-3.5 ${isSubActive ? subItem.color : 'text-gray-400 group-hover:text-gray-500 dark:text-slate-500'}`} />
+                        {subItem.label}
+                      </div>
+
+                      {isSubLocked && (
+                        <Lock className="w-3 h-3 text-amber-500 shrink-0 ml-1.5" />
+                      )}
                     </motion.button>
                   );
                })}
@@ -3491,6 +4120,92 @@ const SidebarNavItem = ({ item, idx, activeTab, setActiveTab, setIsSidebarOpen, 
     </div>
   );
 };
+
+function PremiumWarningPopup({ open, onClose, daysRemaining, onUpgrade }: { open: boolean, onClose: () => void, daysRemaining: number, onUpgrade: () => void }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-300">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-md border border-slate-100 overflow-hidden relative">
+        <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-amber-400 to-amber-500"></div>
+        <div className="p-8 text-center">
+          <div className="w-20 h-20 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner ring-8 ring-amber-50/50">
+            <Lock className="w-10 h-10 text-amber-500" />
+          </div>
+          <h2 className="text-2xl font-black text-slate-800 tracking-tight mb-3">Premium Expiring Soon</h2>
+          <p className="text-slate-500 font-medium leading-relaxed mb-6">
+            Your 90-day freedom period will end in <strong className="text-amber-600 font-black">{daysRemaining} days</strong>. Features like AI Assistant, Accounting, Business Email, and the Online Shop will be locked. Please activate a Premium Package to keep all systems running seamlessly.
+          </p>
+          <div className="space-y-3">
+            <button className="w-full py-4 rounded-xl bg-gradient-to-r from-indigo-500 to-indigo-600 font-black text-white text-xs uppercase tracking-widest shadow-lg shadow-indigo-200 transition-all active:scale-95" onClick={() => { onUpgrade(); onClose(); }}>
+              Upgrade Now
+            </button>
+            <button onClick={onClose} className="w-full py-4 rounded-xl bg-slate-50 text-slate-500 font-bold text-xs uppercase tracking-widest hover:bg-slate-100 transition-colors">
+              Continue Normal Mode
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+async function generateUniqueShopCode(dbInstance: any, ownerEmail?: string): Promise<string> {
+  // Try to find if there is a permanent merchant code registered for this email
+  if (ownerEmail) {
+    const cleanedEmail = ownerEmail.toLowerCase().trim();
+    try {
+      const snap = await getDocs(query(collection(dbInstance, 'permanent_merchant_codes'), where('email', '==', cleanedEmail)));
+      if (!snap.empty) {
+        const existingData = snap.docs[0].data();
+        if (existingData.shopCode) {
+          const cleanCode = existingData.shopCode.toString().replace(/^SHP-/i, '').replace(/[^0-9]/g, '');
+          if (cleanCode.length === 6) {
+            console.log("Reusing permanent shop code:", cleanCode, "for email:", cleanedEmail);
+            return cleanCode;
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Error retrieving permanent shop code:", err);
+    }
+  }
+
+  let isUnique = false;
+  let code = '';
+  // Limit to avoid infinite loops, though highly unlikely
+  let attempts = 0;
+  while (!isUnique && attempts < 50) {
+    const candidate = Math.floor(100000 + Math.random() * 900000).toString();
+    const snap1 = await getDocs(query(collection(dbInstance, 'shops'), where('shopCode', '==', candidate)));
+    const snap2 = await getDocs(query(collection(dbInstance, 'shops'), where('shopCode', '==', `SHP-${candidate}`)));
+    const snap3 = await getDocs(query(collection(dbInstance, 'permanent_merchant_codes'), where('shopCode', '==', candidate)));
+    if (snap1.empty && snap2.empty && snap3.empty) {
+      code = candidate;
+      isUnique = true;
+    }
+    attempts++;
+  }
+
+  if (!code) {
+    code = Math.floor(100000 + Math.random() * 900000).toString();
+  }
+
+  // If we generated a new code and email is provided, save it dynamically in permanent_merchant_codes!
+  if (ownerEmail && code) {
+    const cleanedEmail = ownerEmail.toLowerCase().trim();
+    try {
+      await addDoc(collection(dbInstance, 'permanent_merchant_codes'), {
+        email: cleanedEmail,
+        shopCode: code,
+        createdAt: new Date().toISOString()
+      });
+    } catch (err) {
+      console.error("Error saving permanent merchant code:", err);
+    }
+  }
+
+  return code;
+}
 
 export default function App() {
   console.log("App component rendered");
@@ -3505,6 +4220,9 @@ export default function App() {
       return false;
     }
   });
+
+  const [showPremiumPopup, setShowPremiumPopup] = useState(false);
+  const [premiumDaysRemaining, setPremiumDaysRemaining] = useState(0);
 
   useEffect(() => {
     try {
@@ -3536,6 +4254,7 @@ export default function App() {
       return null;
     }
   });
+  const isMasterAdmin = user?.email?.toLowerCase().trim() === 'stratproamz@gmail.com';
   const [isOnboarded, setIsOnboarded] = useState<boolean | null>(() => {
     try {
       const saved = localStorage.getItem('shopmaster_user');
@@ -3578,11 +4297,14 @@ export default function App() {
   };
   const [isDesktop, setIsDesktop] = useState(() => typeof window !== 'undefined' ? window.innerWidth >= 1024 : true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
-    if (typeof window !== 'undefined' && window.innerWidth >= 1024) {
-      return true;
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('sidebar_visible');
+      if (saved !== null) {
+        return saved === 'true';
+      }
+      return window.innerWidth >= 1024;
     }
-    const saved = localStorage.getItem('sidebar_visible');
-    return saved !== null ? saved === 'true' : true;
+    return true;
   });
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
@@ -3594,9 +4316,6 @@ export default function App() {
     const handleResize = () => {
       const desktop = window.innerWidth >= 1024;
       setIsDesktop(desktop);
-      if (desktop) {
-        setIsSidebarOpen(true);
-      }
     };
     window.addEventListener('resize', handleResize);
     handleResize();
@@ -3618,6 +4337,140 @@ export default function App() {
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
+
+  const [sessionLocationVerified, setSessionLocationVerified] = useState<boolean>(false);
+  const [isFetchingLocation, setIsFetchingLocation] = useState<boolean>(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [locationDetails, setLocationDetails] = useState<any>(null);
+
+  const handleRequestLocation = async () => {
+    if (typeof window === 'undefined' || !navigator.geolocation) {
+      setLocationError("আপনার ডিভাইস বা ব্রাউজার জিপিএস (GPS) সাপোর্ট করে না। অনুগ্রহ করে সঠিক ব্রাউজার ব্যবহার করুন।");
+      return;
+    }
+
+    setIsFetchingLocation(true);
+    setLocationError(null);
+
+    let watchId: number | null = null;
+    let fallbackTimeout: NodeJS.Timeout | null = null;
+
+    const cleanup = () => {
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      if (fallbackTimeout) clearTimeout(fallbackTimeout);
+    };
+
+    const processPosition = async (position: GeolocationPosition) => {
+      cleanup();
+      try {
+        const lat = position.coords.latitude;
+        const lon = position.coords.longitude;
+        const accuracy = position.coords.accuracy;
+        
+        let address = `Latitude: ${lat.toFixed(6)}, Longitude: ${lon.toFixed(6)} (Accuracy: ${Math.round(accuracy)}m)`;
+        try {
+          // Using OSM Nominatim to reverse geocode coordinate to get exact visual location details with high zoom
+          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&accept-language=bn,en&zoom=18&addressdetails=1`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.display_name) {
+              address = data.display_name;
+            }
+          }
+        } catch (err) {
+          console.error("Nominatim reverse geocoding failed, falling back to display coordinates:", err);
+        }
+
+        const info = {
+          latitude: lat,
+          longitude: lon,
+          accuracy: accuracy,
+          address: address,
+          timestamp: new Date().toISOString(),
+          email: user?.email || '',
+          displayName: user?.displayName || 'User'
+        };
+
+        setLocationDetails(info);
+
+        // Save last tracked location directly inside the shops document in Firestore
+        if (user && user.shopId && user.shopId !== 'master') {
+          const shopDocRef = doc(db, 'shops', user.shopId);
+          const shopSnap = await getDoc(shopDocRef);
+          
+          if (shopSnap.exists()) {
+            const shopData = shopSnap.data();
+            const updatedFields: any = {
+              lastTrackedLat: lat,
+              lastTrackedLon: lon,
+              lastTrackedAddress: address,
+              lastTrackedTime: info.timestamp,
+              lastLocationUpdate: serverTimestamp()
+            };
+
+            // Maintain tracking logins log inside an array inside the shop document for direct instant rendering
+            let history = shopData.locationHistory ? [...shopData.locationHistory] : [];
+            history.unshift(info);
+            if (history.length > 30) {
+              history = history.slice(0, 30);
+            }
+            updatedFields.locationHistory = history;
+
+            await updateDoc(shopDocRef, updatedFields);
+          }
+        }
+
+        setSessionLocationVerified(true);
+      } catch (err) {
+        console.error("Error updating location log:", err);
+        setLocationError("লোকেশন ডাটাবেজে সংরক্ষণ করতে সমস্যা হয়েছে। অনুগ্রহ করে ইন্টারনেট সংযোগ পরীক্ষা করে পুনরায় সাবমিট করুন।");
+      } finally {
+        setIsFetchingLocation(false);
+      }
+    };
+
+    let bestPosition: GeolocationPosition | null = null;
+    
+    // Fallback if we don't get highly accurate location within 10 seconds
+    fallbackTimeout = setTimeout(() => {
+      if (bestPosition) {
+        processPosition(bestPosition);
+      } else {
+        cleanup();
+        setIsFetchingLocation(false);
+        setLocationError("লোকেশন সিগন্যাল পেতে রি-কোয়েস্ট টাইমআউট হয়েছে। পুনরায় চেষ্টা করুন।");
+      }
+    }, 15000);
+
+    watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        const accuracy = position.coords.accuracy;
+        if (!bestPosition || accuracy < bestPosition.coords.accuracy) {
+           bestPosition = position;
+        }
+        // If accuracy is better than 20 meters, process it immediately!
+        if (accuracy <= 20) {
+           processPosition(position);
+        }
+      },
+      (error) => {
+        if (error.code === error.PERMISSION_DENIED) {
+           cleanup();
+           setIsFetchingLocation(false);
+           setLocationError("লোকেশন পারমিশন রিফিউজ করা হয়েছে! আপনি এইসিস্টেমটি লোকেশন পারমিশন ছাড়া কোনমতেই ব্যবহার করতে পারবেন না। অনুগ্রহ করে ব্রাউজার রিলোড দিন এবং অনুমতি প্রদান করুন।");
+        } else {
+           console.error("WatchPosition error: waiting for better signal...", error);
+        }
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  };
+
+  useEffect(() => {
+    if (user && !isMasterAdmin && isOnboarded === true && !sessionLocationVerified && !isFetchingLocation) {
+      handleRequestLocation();
+    }
+  }, [user, isMasterAdmin, isOnboarded, sessionLocationVerified]);
 
   const [isFullScreen, setIsFullScreen] = useState(false);
 
@@ -3797,7 +4650,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: prompt,
-          config: { model: "gemini-1.5-flash-latest" }
+          config: { model: "gemini-3.5-flash" }
         })
       });
       
@@ -3821,6 +4674,18 @@ export default function App() {
   const [copiedBlockedInfo, setCopiedBlockedInfo] = useState(false);
   const [loginMode, setLoginMode] = useState<'merchant' | 'staff'>('merchant');
   
+  const [platformBranding, setPlatformBranding] = useState<{ logoBase64: string | null }>({ logoBase64: null });
+
+  useEffect(() => {
+    const fetchBranding = async () => {
+      try {
+        const snap = await getDoc(doc(db, 'system', 'branding'));
+        if (snap.exists()) setPlatformBranding(snap.data() as any);
+      } catch (err) {}
+    };
+    fetchBranding();
+  }, []);
+
   const isLoginPath = () => {
     const path = window.location.pathname.toLowerCase();
     return path.includes('login');
@@ -3954,6 +4819,27 @@ export default function App() {
                 console.error("Error searching shops during login setup:", shopSearchErr);
               }
 
+              if (!onboardStatus) {
+                try {
+                  const newShopCode = await generateUniqueShopCode(db, firebaseUser.email || undefined);
+                  const createdAtISO = new Date().toISOString();
+                  finalShopId = firebaseUser.uid;
+                  await setDoc(doc(db, 'shops', finalShopId), {
+                    name: firebaseUser.displayName ? `${firebaseUser.displayName}'s Shop` : 'My Shop',
+                    shopCode: newShopCode,
+                    ownerEmail: firebaseUser.email,
+                    ownerUid: firebaseUser.uid,
+                    establishedYear: new Date().getFullYear().toString(),
+                    phone: '',
+                    type: 'retail',
+                    createdAt: createdAtISO
+                  });
+                  onboardStatus = true;
+                } catch (e) {
+                  console.error("Auto onboard error", e);
+                }
+              }
+
               if (isBlocked) {
                 await signOut(auth);
                 setUser(null);
@@ -4019,8 +4905,7 @@ export default function App() {
   const [dashboardPeriod, setDashboardPeriod] = useState<'day' | 'week' | 'month' | 'year'>('day');
   const [dashboardViewMetric, setDashboardViewMetric] = useState<'revenue' | 'profit'>('revenue');
   const [syncQueue, setSyncQueue] = useState<any[]>([]);
-  const isMasterAdmin = user?.email?.toLowerCase().trim() === 'stratproamz@gmail.com';
-
+  
   useEffect(() => {
     const fetchSyncQueue = async () => {
       const queue = await getSyncQueue();
@@ -4050,7 +4935,7 @@ export default function App() {
       if (!user || !user.shopId) throw new Error("User not authenticated");
 
       // Generate a unique 6-digit shop code
-      const generatedShopCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const generatedShopCode = await generateUniqueShopCode(db, user.email || undefined);
 
       // Save to global shops collection for master admin
       // We use the shopId (merchant uid) as the document ID for the shop
@@ -4066,20 +4951,26 @@ export default function App() {
 
       // Update current shop settings - isolated by shopId
       const settingsRef = doc(db, 'settings', user.shopId);
+      const createdAtISO = new Date().toISOString();
       await setDoc(settingsRef, {
         ...shopSettings,
         shopId: user.shopId,
         shopCode: generatedShopCode,
         name: formData.name,
         address: formData.address,
-        phone: formData.phone,
+        phone: formData.phone || formData.whatsapp,
+        whatsapp: formData.whatsapp,
+        division: formData.division,
+        district: formData.district,
+        upazila: formData.upazila,
         ownerName: formData.ownerName || '',
         nidNumber: formData.nidNumber || '',
         tradeLicenseNumber: formData.tradeLicenseNumber || '',
         tradeLicenseExpiry: formData.tradeLicenseExpiry || '',
         logoUrl: formData.logo,
         type: formData.type,
-        domain: formData.domain
+        domain: formData.domain,
+        createdAt: createdAtISO
       });
 
       setIsOnboarded(true);
@@ -4138,17 +5029,62 @@ export default function App() {
     phone: '',
     receiptWidth: '58mm',
     receiptFooter: "Thank you for shopping with us!\nPowered by ShopMaster",
-    waGatewayType: 'manual',
+    waGatewayType: 'zender',
     autoSendWhatsApp: false,
     aiWhatsAppEnabled: false,
-    waTemplateEnglish: "Hello *{{customerName}}*, thank you for shopping at *{{shopName}}*! Your invoice #{{invoiceId}} total is {{currencySymbol}} {{totalAmount}}.",
-    waTemplateBengali: "প্রিয় *{{customerName}}*, *{{shopName}}*-এ কেনাকাটা করার জন্য ধন্যবাদ! আপনার ইনভয়েস #{{invoiceId}} এর মোট পরিমাণ {{currencySymbol}} {{totalAmount}} টাকা।",
-    printLanguage: 'bn',
-    systemLanguage: 'bn',
+    waTemplateEnglish: "Hello *{{customerName}}*, thank you for shopping at *{{shopName}}*! Your invoice #{{invoiceId}} total is {{currencySymbol}} {{totalAmount}}.\n\nView Invoice: {{invoiceLink}}",
+    waTemplateBengali: "প্রিয় *{{customerName}}*, *{{shopName}}*-এ কেনাকাটা করার জন্য ধন্যবাদ! আপনার ইনভয়েস #{{invoiceId}} এর মোট পরিমাণ {{currencySymbol}} {{totalAmount}}।\n\nইনভয়েস দেখুন: {{invoiceLink}}",
+    printLanguage: 'en',
+    systemLanguage: 'en',
     currencySymbol: 'TK',
     jarvisLanguage: 'bn',
     jarvisVoiceGender: 'male',
   });
+
+  const checkPremiumStatus = () => {
+    if (user?.email?.toLowerCase().trim() === 'stratproamz@gmail.com') return true;
+    if (user?.role === 'master_admin' || user?.shopId === 'master') return true;
+    if (shopSettings?.premiumActive) return true;
+    
+    if (shopSettings?.premiumUntil) {
+      const untilDate = new Date(shopSettings.premiumUntil);
+      if (untilDate.getTime() > new Date().getTime()) return true;
+    }
+    
+    const createdDate = shopSettings?.createdAt ? new Date(shopSettings.createdAt) : new Date();
+    const trialEnd = new Date(createdDate.getTime() + 90 * 24 * 60 * 60 * 1000);
+    if (trialEnd.getTime() > new Date().getTime()) return true;
+    
+    return false;
+  };
+  
+  const isPremiumUnlocked = checkPremiumStatus();
+  const PREMIUM_ONLY_IDS = ['jarvis', 'payment_method', 'loan_management', 'live_tv', 'business_bio', 'business_mail', 'accounting', 'daily_closing', 'warranty', 'note', 'online_shop', 'messaging_gateway'];
+
+  useEffect(() => {
+    if (user && shopSettings && user.role !== 'master_admin' && user.email?.toLowerCase().trim() !== 'stratproamz@gmail.com') {
+          let expirationDate: Date | null = null;
+
+          if (shopSettings.premiumActive && shopSettings.premiumUntil) {
+             expirationDate = new Date(shopSettings.premiumUntil);
+          } else if (!shopSettings.premiumActive && !shopSettings.lifetime) {
+             const createdDate = shopSettings.createdAt ? new Date(shopSettings.createdAt) : new Date();
+             expirationDate = new Date(createdDate.getTime() + 90 * 24 * 60 * 60 * 1000);
+          }
+
+          if (expirationDate) {
+             const now = new Date();
+             const timeDiff = expirationDate.getTime() - now.getTime();
+             const daysDiff = Math.ceil(timeDiff / (1000 * 3600 * 24));
+             
+             if (daysDiff > 0 && daysDiff <= 7 && !sessionStorage.getItem('premiumPopupShown')) {
+                setPremiumDaysRemaining(daysDiff);
+                setShowPremiumPopup(true);
+                sessionStorage.setItem('premiumPopupShown', 'true');
+             }
+          }
+    }
+  }, [user, shopSettings]);
 
   function resetStateToDefaults() {
     setIsOnboarded(null);
@@ -4176,13 +5112,13 @@ export default function App() {
       phone: '',
       receiptWidth: '58mm',
       receiptFooter: "Thank you for shopping with us!\nPowered by ShopMaster",
-      waGatewayType: 'manual',
+      waGatewayType: 'zender',
       autoSendWhatsApp: false,
       aiWhatsAppEnabled: false,
-      waTemplateEnglish: "Hello *{{customerName}}*, thank you for shopping at *{{shopName}}*! Your invoice #{{invoiceId}} total is {{currencySymbol}} {{totalAmount}}.",
-      waTemplateBengali: "প্রিয় *{{customerName}}*, *{{shopName}}*-এ কেনাকাটা করার জন্য ধন্যবাদ! আপনার ইনভয়েস #{{invoiceId}} এর মোট পরিমাণ {{currencySymbol}} {{totalAmount}} টাকা।",
-      printLanguage: 'bn',
-      systemLanguage: 'bn',
+      waTemplateEnglish: "Hello *{{customerName}}*, thank you for shopping at *{{shopName}}*! Your invoice #{{invoiceId}} total is {{currencySymbol}} {{totalAmount}}.\n\nView Invoice: {{invoiceLink}}",
+      waTemplateBengali: "প্রিয় *{{customerName}}*, *{{shopName}}*-এ কেনাকাটা করার জন্য ধন্যবাদ! আপনার ইনভয়েস #{{invoiceId}} এর মোট পরিমাণ {{currencySymbol}} {{totalAmount}}।\n\nইনভয়েস দেখুন: {{invoiceLink}}",
+      printLanguage: 'en',
+      systemLanguage: 'en',
       currencySymbol: 'TK',
       jarvisLanguage: 'bn',
       jarvisVoiceGender: 'male',
@@ -4257,8 +5193,29 @@ export default function App() {
             return;
           }
         }
-
-        setIsOnboarded(false);
+        
+        try {
+          const newShopCode = await generateUniqueShopCode(db, user.email || undefined);
+          const createdAtISO = new Date().toISOString();
+          const finalShopId = user.uid || user.shopId;
+          await setDoc(doc(db, 'shops', finalShopId), {
+            name: user.displayName ? `${user.displayName}'s Shop` : 'My Shop',
+            shopCode: newShopCode,
+            ownerEmail: user.email,
+            ownerUid: user.uid,
+            establishedYear: new Date().getFullYear().toString(),
+            phone: '',
+            type: 'retail',
+            createdAt: createdAtISO
+          });
+          const updatedUser = { ...user, shopId: finalShopId, isOnboarded: true };
+          setUser(updatedUser);
+          localStorage.setItem('shopmaster_user', JSON.stringify(updatedUser));
+          setIsOnboarded(true);
+        } catch(e) {
+           console.error("Fallback auto onboard error", e);
+           setIsOnboarded(false);
+        }
       } catch (err) {
         console.error("Error checking onboarding status falling back:", err);
       }
@@ -4352,16 +5309,23 @@ export default function App() {
   }, [shopSettings?.logoBase64, shopSettings?.faviconBase64]);
 
   useEffect(() => {
-    if (dynamicSettings?.platformTitle) {
-      document.title = dynamicSettings.platformTitle;
-    } else if (dynamicSettings?.name) {
-      document.title = dynamicSettings.name;
+    if (user) {
+      if (dynamicSettings?.platformTitle) {
+        document.title = dynamicSettings.platformTitle;
+      } else if (dynamicSettings?.name) {
+        document.title = dynamicSettings.name;
+      } else {
+        document.title = "SHP MASTER";
+      }
+    } else {
+      // Default browser title when visitor is on logon screen or no user has logged in
+      document.title = "SHP MASTER";
     }
-  }, [dynamicSettings?.platformTitle, dynamicSettings?.name]);
+  }, [user, dynamicSettings?.platformTitle, dynamicSettings?.name]);
 
   useEffect(() => {
     document.documentElement.dir = dynamicSettings?.systemLanguage === 'ar' ? 'rtl' : 'ltr';
-    document.documentElement.lang = dynamicSettings?.systemLanguage || 'bn';
+    document.documentElement.lang = dynamicSettings?.systemLanguage || 'en';
   }, [dynamicSettings?.systemLanguage]);
 
   useEffect(() => {
@@ -4398,13 +5362,13 @@ export default function App() {
         phone: '',
         receiptWidth: '58mm',
         receiptFooter: "Thank you for shopping with us!\nPowered by ShopMaster",
-        waGatewayType: 'manual',
+        waGatewayType: 'zender',
         autoSendWhatsApp: false,
         aiWhatsAppEnabled: false,
-        waTemplateEnglish: "Hello *{{customerName}}*, thank you for shopping at *{{shopName}}*! Your invoice #{{invoiceId}} total is {{currencySymbol}} {{totalAmount}}.",
-        waTemplateBengali: "প্রিয় *{{customerName}}*, *{{shopName}}*-এ কেনাকাটা করার জন্য ধন্যবাদ! আপনার ইনভয়েস #{{invoiceId}} এর মোট পরিমাণ {{currencySymbol}} {{totalAmount}} টাকা।",
-        printLanguage: 'bn',
-        systemLanguage: 'bn',
+        waTemplateEnglish: "Hello *{{customerName}}*, thank you for shopping at *{{shopName}}*! Your invoice #{{invoiceId}} total is {{currencySymbol}} {{totalAmount}}.\n\nView Invoice: {{invoiceLink}}",
+        waTemplateBengali: "প্রিয় *{{customerName}}*, *{{shopName}}*-এ কেনাকাটা করার জন্য ধন্যবাদ! আপনার ইনভয়েস #{{invoiceId}} এর মোট পরিমাণ {{currencySymbol}} {{totalAmount}}।\n\nইনভয়েস দেখুন: {{invoiceLink}}",
+        printLanguage: 'en',
+        systemLanguage: 'en',
         currencySymbol: 'TK',
       });
       return;
@@ -4536,6 +5500,72 @@ export default function App() {
     };
   }, [user, isMasterAdmin, isOnboarded, authChecked]);
 
+  // Auto-sync merchant logo base64 & URL to global shops collection for display across Customer Portal and listing dashboards
+  useEffect(() => {
+    if (user && user.shopId && shopSettings && authChecked && shops && shops.length > 0) {
+      const userRole = (user.role || '').toLowerCase().trim();
+      const isMaster = user.email?.toLowerCase().trim() === 'stratproamz@gmail.com';
+      if (userRole === 'admin' || userRole === 'owner' || isMaster) {
+        const currentShop = shops.find((s: any) => s.id === user.shopId);
+        if (currentShop) {
+          const settingsLogoBase64 = shopSettings.logoBase64 || '';
+          const settingsLogoUrl = shopSettings.logoUrl || '';
+          
+          const currentShopLogo = currentShop.logo || '';
+          const currentShopLogoBase64 = currentShop.logoBase64 || '';
+          const currentShopLogoUrl = currentShop.logoUrl || '';
+          
+          const mismatchBase64 = settingsLogoBase64 !== currentShopLogoBase64;
+          const mismatchUrl = settingsLogoUrl !== currentShopLogoUrl;
+          const mismatchLogo = (settingsLogoBase64 || settingsLogoUrl) !== currentShopLogo;
+
+          if (mismatchBase64 || mismatchUrl || mismatchLogo) {
+            console.log("Auto-syncing merchant logo configuration to global shops directory...");
+            const shopRef = doc(db, 'shops', user.shopId);
+            setDoc(shopRef, {
+              logo: settingsLogoBase64 || settingsLogoUrl || '',
+              logoBase64: settingsLogoBase64,
+              logoUrl: settingsLogoUrl,
+            }, { merge: true }).catch(err => console.error("Error auto-syncing merchant logo:", err));
+          }
+        }
+      }
+    }
+  }, [user, shopSettings, shops, authChecked]);
+
+  // Auto-migration / Safe validation hook: Check and normalize shopCode to exactly 6 numeric digits
+  useEffect(() => {
+    if (!authChecked || !user || !user.shopId || user.shopId === 'master' || user.id === 'master') return;
+
+    const currentCode = (shopSettings.shopCode || '').toString().trim();
+    const cleanCode = currentCode.replace(/^SHP-/i, '').replace(/[^0-9]/g, '');
+
+    // Trigger migration if settings are retrieved but the code is empty, contains non-digits, or is not 6 digits
+    if (shopSettings.name && (cleanCode.length !== 6 || cleanCode !== currentCode)) {
+      const runCodeMigration = async () => {
+        console.log("Auto-migrating legacy or non-numeric shopCode:", currentCode);
+        const validCode = await generateUniqueShopCode(db, user.email || undefined);
+
+        try {
+          // Update settings collection securely
+          await setDoc(doc(db, 'settings', user.shopId), {
+            shopCode: validCode
+          }, { merge: true });
+
+          // Update shops collection securely
+          await setDoc(doc(db, 'shops', user.shopId), {
+            shopCode: validCode
+          }, { merge: true });
+
+          console.log("Automatically converted legacy shop code to stable numeric 6-digit standard code:", validCode);
+        } catch (err) {
+          console.error("Failed to auto-migrate legacy shop code:", err);
+        }
+      };
+      runCodeMigration();
+    }
+  }, [user, shopSettings.shopCode, authChecked]);
+
   const handleAddNote = async (text: string, color: string, extra?: { priority?: string, dueDate?: string }) => {
     try {
       if (!user || !user.shopId) return;
@@ -4587,10 +5617,11 @@ export default function App() {
     setLoading(true);
     
     try {
-      // 1. Fetch the shop matching the entered shopCode
+      // 1. Fetch the shop matching the entered shopCode (handling legacy SHP- prefixed codes)
+      const cleanedCode = loginShopCode.trim().replace(/^SHP-/i, '').replace(/[^0-9]/g, '').slice(0, 6);
       const shopQuery = query(
         collection(db, 'shops'),
-        where('shopCode', '==', loginShopCode.trim())
+        where('shopCode', 'in', [cleanedCode, `SHP-${cleanedCode}`])
       );
       const shopSnapshot = await getDocs(shopQuery);
       if (shopSnapshot.empty) {
@@ -4641,6 +5672,7 @@ export default function App() {
     try {
       await signOut(auth);
     } catch(e) {}
+    setCachedAccessToken(null);
     setUser(null);
     resetStateToDefaults();
     localStorage.removeItem('shopmaster_user');
@@ -4651,6 +5683,11 @@ export default function App() {
       setLoading(true);
       const result = await signInWithPopup(auth, googleProvider);
       const googleUser = result.user;
+
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (credential?.accessToken) {
+        setCachedAccessToken(credential.accessToken);
+      }
       
       const isMasterAdmin = googleUser.email?.toLowerCase().trim() === "stratproamz@gmail.com";
       const existingAppUser = appUsers.find(u => u.username.toLowerCase() === googleUser.email?.split('@')[0].toLowerCase());
@@ -4734,8 +5771,23 @@ export default function App() {
       localStorage.setItem('shopmaster_user', JSON.stringify(userData));
       setNotification({ message: `Signed in as ${userData.displayName}`, type: 'success' });
     } catch (error: any) {
-      console.error("Google login error", error);
-      setAuthError(`Google Sign-In failed: ${error.message}`);
+      const isPopupClosed = 
+        error?.code === 'auth/popup-closed-by-user' || 
+        error?.code === 'auth/cancelled-popup-request' ||
+        (error?.message && (error.message.includes('popup-closed-by-user') || error.message.includes('cancelled-popup-request'))) ||
+        String(error).includes('popup-closed-by-user') ||
+        String(error).includes('cancelled-popup-request');
+
+      if (isPopupClosed) {
+        console.warn("Google login popup closed by user (expected in headless / sandbox testing environments).");
+        setAuthError(''); 
+      } else if (error?.code === 'auth/network-request-failed' || error?.message?.includes('network-request-failed') || error?.message?.includes('Pending promise was never set')) {
+        console.error("Google login error due to network or iframe restricted popup", error);
+        setAuthError(`Google Sign-In failed (Network / Popup Blocked). If you are using the AI Studio preview, please open the app in a new tab (using the arrow icon at the top right) to log in with Google, or check your internet connection.`);
+      } else {
+        console.error("Google login error", error);
+        setAuthError(`Google Sign-In failed: ${error.message}`);
+      }
     } finally {
       setLoading(false);
     }
@@ -4975,7 +6027,8 @@ export default function App() {
         }
       }
 
-      if (sendWhatsApp && isOnline) {
+      const autoSendBg = dynamicSettings.whatsapp_status === 'connected' || dynamicSettings.waGatewayType === 'zender' || dynamicSettings.waGatewayType === 'ultramsg' || dynamicSettings.waGatewayType === 'metacloud' || dynamicSettings.autoSendWhatsApp;
+      if ((sendWhatsApp || autoSendBg) && isOnline && finalSale.customerPhone) {
         await sendWhatsAppInvoice(finalSale, dynamicSettings, dynamicSettings.systemLanguage === 'bn' ? 'bn' : (dynamicSettings.systemLanguage === 'ar' ? 'ar' : 'en'));
       }
 
@@ -5015,11 +6068,6 @@ export default function App() {
       setCheckoutData({ customerId: '', walkInName: '', walkInPhone: '', paidAmount: 0, paymentMethod: 'cash', orderId: '' });
       setEditingSale(null);
       setShowReceiptModal(true);
-
-      // Auto Send WhatsApp if customer has phone and auto-send is enabled
-      if (finalSale.customerPhone && dynamicSettings.autoSendWhatsApp) {
-        sendWhatsAppInvoice(finalSale, dynamicSettings, dynamicSettings.systemLanguage === 'bn' ? 'bn' : (dynamicSettings.systemLanguage === 'ar' ? 'ar' : 'en'));
-      }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'sales');
       setNotification({ message: "Failed to complete transaction. Please try again.", type: 'error' });
@@ -5276,18 +6324,27 @@ export default function App() {
     setIsSavingSettings(true);
     try {
       // Security measure: Protect original shopCode and ownerEmail for non-master admins
-      const isMaster = user.email?.toLowerCase().trim() === 'stratproamz@gmail.com';
-      const finalShopCode = isMaster ? (newSettings.shopCode || shopSettings.shopCode || '') : (shopSettings.shopCode || '');
-      const finalOwnerEmail = isMaster ? (user.email || '') : (shopSettings.ownerEmail || user.email || '');
+      let finalShopCode = (shopSettings.shopCode || newSettings.shopCode || '').toString().replace(/^SHP-/i, '').replace(/[^0-9]/g, '').slice(0, 6);
+      if (finalShopCode.length !== 6) {
+        finalShopCode = await generateUniqueShopCode(db, user.email || undefined);
+      }
+      const finalOwnerEmail = shopSettings.ownerEmail || user.email || '';
 
       // Update global shop overview for master admin or merchant themselves
       const shopRef = doc(db, 'shops', user.shopId);
       await setDoc(shopRef, {
         name: newSettings.name || 'Unnamed',
         address: newSettings.address || '',
-        phone: newSettings.phone || '',
+        phone: newSettings.phone || newSettings.whatsapp || '',
+        whatsapp: newSettings.whatsapp || '',
+        division: newSettings.division || '',
+        district: newSettings.district || '',
+        upazila: newSettings.upazila || '',
         shopCode: finalShopCode,
         ownerEmail: finalOwnerEmail,
+        logo: newSettings.logoBase64 || newSettings.logoUrl || '',
+        logoBase64: newSettings.logoBase64 || '',
+        logoUrl: newSettings.logoUrl || '',
         updatedAt: serverTimestamp()
       }, { merge: true });
 
@@ -5607,7 +6664,7 @@ export default function App() {
     }
   };
 
-  const systemLang = dynamicSettings.systemLanguage || 'bn';
+  const systemLang = dynamicSettings.systemLanguage || 'en';
   const st = (key: keyof typeof SYSTEM_TRANSLATIONS['en']) => (SYSTEM_TRANSLATIONS[systemLang] as any)[key] || (SYSTEM_TRANSLATIONS['en'] as any)[key];
   const isRtl = systemLang === 'ar';
   (window as any)._globalCurrencySymbol = dynamicSettings.currencySymbol || 'TK';
@@ -5629,7 +6686,8 @@ export default function App() {
     return (
       <CustomerPortal 
         onBack={() => handleSetShowCustomerPortal(false)} 
-        lang={shopSettings.systemLanguage || 'bn'} 
+        lang={shopSettings.systemLanguage || 'en'} 
+        platformBranding={platformBranding}
       />
     );
   }
@@ -5656,8 +6714,13 @@ export default function App() {
             <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -mr-20 -mt-20 blur-2xl" />
             
             <div className="relative z-20">
-              <div className="w-16 h-16 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center mb-10 shadow-lg border border-white/30">
-                <Building2 className="w-8 h-8 text-white" />
+              <div className="w-16 h-16 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center mb-10 shadow-lg border border-white/30 overflow-hidden shrink-0">
+                {platformBranding?.logoBase64 ? (
+                  <img src={platformBranding.logoBase64} alt="Platform Logo" className="w-full h-full object-cover" />
+                ) : (
+                  <img src="/LOGO.JPG" alt="Platform Logo" className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display='none'; if(e.currentTarget.nextElementSibling) (e.currentTarget.nextElementSibling as HTMLElement).style.display='block'; }} />
+                )}
+                {(!platformBranding?.logoBase64) && <Building2 className="w-8 h-8 text-white hidden" />}
               </div>
               <h1 className="text-3xl md:text-4xl font-bold mb-4 tracking-tight leading-tight">
                 {st('loginTitle')}
@@ -5970,10 +7033,111 @@ export default function App() {
     );
   }
 
+  if (user && !isMasterAdmin && isOnboarded === false) {
     return (
-      <ErrorBoundary>
-        <div className={`min-h-screen bg-slate-50 dark:bg-slate-950 flex ${isRtl ? 'flex-row-reverse' : 'flex-row'}`}>
-          <aside className={`fixed lg:static inset-y-0 ${isRtl ? 'right-0' : 'left-0'} z-50 w-80 lg:w-64 bg-white dark:bg-slate-900 border-r border-gray-100 dark:border-slate-800 flex flex-col h-full transform transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : (isRtl ? 'translate-x-full lg:translate-x-0' : '-translate-x-full lg:translate-x-0')} overflow-hidden`}>
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500 mb-4"></div>
+        <p>Setting up your workspace...</p>
+      </div>
+    );
+  }
+
+  if (user && !isMasterAdmin && isOnboarded === true && !sessionLocationVerified) {
+    return (
+      <div className="min-h-screen bg-slate-950 font-sans flex items-center justify-center p-4 select-none relative overflow-hidden">
+         {/* Ambient high-tech neon backgrounds */}
+         <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,#312e81,transparent_50%)] opacity-30 pointer-events-none"></div>
+         <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_80%,#1e1b4b,transparent_60%)] opacity-30 pointer-events-none"></div>
+         {/* Technical decorative lines and grid */}
+         <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_50%,#000_70%,transparent_100%)] opacity-10 pointer-events-none"></div>
+
+         <div className="relative w-full max-w-lg bg-slate-900/90 border border-slate-850 rounded-[32px] p-8 md:p-10 shadow-2xl backdrop-blur-md text-center flex flex-col items-center">
+            
+            {/* Visual Pulsing Map Pin Indicator */}
+            <div className="relative w-24 h-24 mb-6 flex items-center justify-center">
+              <div className="absolute inset-0 rounded-full bg-indigo-600/10 animate-ping duration-1000"></div>
+              <div className="absolute -inset-2 rounded-full bg-indigo-500/5 animate-pulse"></div>
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-indigo-600 to-indigo-500 flex items-center justify-center shadow-lg border border-indigo-400/30 overflow-hidden">
+                {platformBranding?.logoBase64 ? (
+                   <img src={platformBranding.logoBase64} alt="Platform Logo" className="w-full h-full object-cover" />
+                ) : (
+                   <img src="/LOGO.JPG" alt="Platform Logo" className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display='none'; if(e.currentTarget.nextElementSibling) (e.currentTarget.nextElementSibling as HTMLElement).style.display='block'; }} />
+                )}
+                {(!platformBranding?.logoBase64) && <MapPin className="w-8 h-8 text-white hidden" />}
+              </div>
+              <div className="absolute -bottom-1 -right-1 w-7 h-7 rounded-lg bg-rose-600 border border-slate-900 flex items-center justify-center shadow-md">
+                <Shield className="w-4 h-4 text-white" />
+              </div>
+            </div>
+
+            <h2 className="text-2xl md:text-3xl font-black text-white leading-tight uppercase tracking-tight">
+               লোকেশন ভেরিফিকেশন লক
+            </h2>
+            <p className="text-xs text-indigo-400 font-black uppercase tracking-widest mt-1.5 flex items-center gap-1.5">
+               <span>LOCATION PROTECTION SECURED</span>
+            </p>
+
+            <div className="w-full h-px bg-slate-800 my-6"></div>
+
+            <p className="text-slate-300 text-xs md:text-sm font-semibold leading-relaxed max-w-md">
+               সিস্টেমে কাজ করার পূর্বে আপনার লোকেশন ভেরিফাই করুন। 
+            </p>
+
+            {/* Error message */}
+            {locationError && (
+              <div className="w-full mt-6 bg-rose-950/40 border border-rose-800/50 p-4 rounded-2xl text-left flex gap-3 text-rose-300">
+                <ShieldAlert className="w-5 h-5 flex-shrink-0 mt-0.5 text-rose-400" />
+                <div className="space-y-1">
+                  <p className="text-xs font-black uppercase tracking-wider">অ্যাক্সেস ত্রুটি (Access Blocked):</p>
+                  <p className="text-xs font-bold leading-relaxed">{locationError}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Manual Action buttons */}
+            <div className="w-full mt-8 space-y-3">
+              <button
+                onClick={handleRequestLocation}
+                disabled={isFetchingLocation}
+                className="w-full cursor-pointer bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-black text-xs uppercase tracking-widest py-4 px-6 rounded-2xl border border-indigo-400/20 shadow-xl shadow-indigo-950 transition-all flex items-center justify-center gap-2.5 active:scale-98 disabled:opacity-40"
+              >
+                {isFetchingLocation ? (
+                  <>
+                     <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                     <span>লোকেশন লোড হচ্ছে...</span>
+                  </>
+                ) : (
+                  <>
+                     <Navigation className="w-4 h-4 animate-pulse" />
+                     <span>লোকেশন ভেরিফাই ও লক আনলক করুন</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                onClick={() => signOut(auth)}
+                className="w-full cursor-pointer py-3 text-slate-400 hover:text-white font-bold text-xs uppercase tracking-wider transition-all hover:bg-slate-800/40 rounded-xl"
+              >
+                সাইন আউট করুন (Logout)
+              </button>
+            </div>
+         </div>
+      </div>
+    );
+  }
+
+  return (
+    <ErrorBoundary>
+      <div className={`min-h-screen bg-slate-50 dark:bg-slate-950 flex ${isRtl ? 'flex-row-reverse' : 'flex-row'}`}>
+          {/* Mobile Backdrop Overlay */}
+          {!isDesktop && isSidebarOpen && (
+            <div 
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 transition-opacity duration-300"
+              onClick={() => setIsSidebarOpen(false)}
+            />
+          )}
+
+          <aside className={`fixed lg:sticky top-0 inset-y-0 ${isRtl ? 'right-0' : 'left-0'} z-50 bg-white dark:bg-slate-900 border-r border-gray-100 dark:border-slate-800 flex flex-col h-screen transform transition-all duration-300 ${isSidebarOpen ? 'translate-x-0 w-80 lg:w-64 opacity-100' : `${isRtl ? 'translate-x-full' : '-translate-x-full'} w-0 lg:w-0 lg:-translate-x-full lg:opacity-0 pointer-events-none`} overflow-hidden`}>
 
             <div className="p-6 flex items-center justify-between gap-3 relative overflow-hidden group">
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
@@ -5981,9 +7145,18 @@ export default function App() {
                   <motion.div 
                     whileHover={{ rotate: 360 }}
                     transition={{ duration: 0.8, ease: "anticipate" }}
-                    className="w-11 h-11 bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-100"
+                    className="w-11 h-11 bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-2xl overflow-hidden flex items-center justify-center shadow-lg shadow-indigo-100 flex-shrink-0"
                   >
-                    <Building2 className="w-6 h-6 text-white" />
+                    {shopSettings.logoBase64 || shopSettings.logoUrl ? (
+                      <img src={shopSettings.logoBase64 || shopSettings.logoUrl} alt="Logo" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    ) : (
+                      <img 
+                        src="/LOGO.JPG" 
+                        alt="Logo" 
+                        className="w-full h-full object-cover" 
+                        referrerPolicy="no-referrer" 
+                      />
+                    )}
                   </motion.div>
                   <div className="flex flex-col whitespace-nowrap">
                     <span className="font-black text-xl text-gray-900 dark:text-gray-100 tracking-tight leading-none group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors uppercase">{shopSettings.name}</span>
@@ -5993,83 +7166,91 @@ export default function App() {
                 
                 <button 
                   onClick={() => setIsSidebarOpen(false)}
-                  className="p-2 hover:bg-rose-50 dark:hover:bg-rose-950/20 rounded-xl transition-all text-gray-400 hover:text-rose-600 border border-transparent hover:border-rose-100 lg:hidden"
+                  className="p-2 hover:bg-rose-50 dark:hover:bg-rose-950/20 rounded-xl transition-all text-gray-400 hover:text-rose-600 border border-transparent hover:border-rose-100"
                   title="Hide Sidebar"
                 >
                   <ChevronLeft className={`w-5 h-5 transition-transform ${isRtl ? 'rotate-180' : ''}`} />
                 </button>
               </div>
 
-          <nav className="flex-1 px-4 py-6 overflow-y-auto custom-scrollbar space-y-1.5 bg-white dark:bg-slate-900">
+          <nav className="flex-1 px-4 py-6 overflow-y-auto custom-scrollbar space-y-1.5 bg-white dark:bg-slate-900" id="main-navigation-menu">
             {[
               { id: 'core', label: 'Core', items: [
                 { id: 'dashboard', icon: LayoutDashboard, label: st('dashboard'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
                 { id: 'pos', icon: ShoppingBag, label: st('pos'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+                { id: 'draft_invoice', icon: FileText, label: 'Draft Invoice', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+                { id: 'how_to_use', icon: BookOpen, label: 'How To Use', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team', 'warehouse'] },
               ]},
               { id: 'inventory_section', label: 'Inventory', items: [
                 { id: 'inventory_dashboard', icon: LayoutDashboard, label: 'Inventory Dashboard', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team', 'warehouse'],
                   subItems: [
-                    { id: 'inventory', icon: Package, label: st('inventory'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team', 'warehouse'] },
-                    { id: 'warehouse', icon: Warehouse, label: st('warehouse'), roles: ['admin', 'manager', 'warehouse'] },
+                    { id: 'inventory', icon: Package, label: st('inventory'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+                    { id: 'warehouse', icon: Warehouse, label: st('warehouse'), roles: ['warehouse'] },
                     { id: 'supplier', icon: Users, label: st('supplier'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
                     { id: 'barcode', icon: Barcode, label: st('barcode'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'damage_expire', icon: Trash2, label: 'Damage/Expire', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager'] },
+                    { id: 'damage_expire', icon: Trash2, label: 'Damage/Expire', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
                   ]
                 }
               ]},
               { id: 'sales_crm_section', label: 'Sales & CRM', items: [
                 { id: 'sales_crm_dashboard', icon: LayoutDashboard, label: 'Sales & CRM Dashboard', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'],
                   subItems: [
-                    { id: 'sales', icon: History, label: st('sales'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+                    { id: 'sales', icon: History, label: 'Sales Records', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
                     { id: 'customers', icon: Users, label: st('customers'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
                     { id: 'customer_orders', icon: ShoppingBag, label: 'Customer Orders', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
                     { id: 'online_shop', icon: Globe, label: st('onlineShop'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
                     { id: 'courier', icon: Truck, label: st('courier'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'warranty', icon: ShieldCheck, label: st('warranty'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager'] },
-                    { id: 'service_offer', icon: Zap, label: st('serviceOffer'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager'] },
-                    { id: 'activation_code', icon: KeySquare, label: st('activationCode'), roles: ['admin', 'manager', 'assistant_manager'] },
+                    { id: 'warranty', icon: ShieldCheck, label: st('warranty'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+                    { id: 'service_offer', icon: Zap, label: 'Service', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+                    { id: 'activation_code', icon: KeySquare, label: 'Activation', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
                     { id: 'note', icon: StickyNote, label: st('note'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'recycle_bin', icon: Trash2, label: st('recycleBin'), roles: ['admin'] },
+                    { id: 'recycle_bin', icon: Trash2, label: st('recycleBin'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
                   ]
                 }
               ]},
               { id: 'accounting_section', label: 'Accounting', items: [
                 { id: 'accounting_dashboard', icon: LayoutDashboard, label: 'Accounting Dashboard', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'],
                   subItems: [
-                    { id: 'accounting', icon: CalculatorIcon, label: st('hishabNikash'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager'] },
-                    { id: 'daily_closing', icon: Clock, label: st('dailyClosing'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager'] },
+                    { id: 'accounting', icon: CalculatorIcon, label: st('hishabNikash'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
+                    { id: 'daily_closing', icon: Clock, label: st('dailyClosing'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
                   ]
                 }
               ]},
               { id: 'management_section', label: 'Management', items: [
-                { id: 'management_dashboard', icon: LayoutDashboard, label: 'Management Dashboard', roles: ['admin', 'manager'],
+                { id: 'management_dashboard', icon: LayoutDashboard, label: 'Management Dashboard', roles: ['admin'],
                   subItems: [
+                    { id: 'membership', icon: Award, label: 'Membership', roles: ['admin', 'manager'] },
                     { id: 'shops', icon: Globe, label: 'Merchant Console', roles: [], emailScope: 'stratproamz@gmail.com' },
-                    { id: 'jarvis', icon: Bot, label: st('jarvisAI'), roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'payment_method', icon: CreditCard, label: st('paymentMethod'), roles: ['admin', 'manager'] },
-                    { id: 'loan_management', icon: Banknote, label: st('loanManagement'), roles: ['admin', 'manager'] },
-                    { id: 'community_hub', icon: Users, label: 'Community Hub', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'live_tv', icon: Tv, label: 'Live TV', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'business_bio', icon: User, label: 'Business Bio', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'contact_us', icon: Phone, label: 'Contact Us', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'business_mail', icon: Mail, label: 'Business Mail', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'meet_scheduler', icon: Calendar, label: 'Meet Scheduler', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'release_logs', icon: Activity, label: 'Release Logs', roles: ['admin', 'manager', 'assistant_manager', 'sales_manager', 'sales_team'] },
-                    { id: 'messaging_gateway', icon: MessageSquare, label: 'Messaging Gateway', roles: [], emailScope: 'stratproamz@gmail.com' },
+                    { id: 'jarvis', icon: Bot, label: st('jarvisAI'), roles: ['admin'] },
+                    { id: 'payment_method', icon: CreditCard, label: st('paymentMethod'), roles: ['admin'] },
+                    { id: 'loan_management', icon: Banknote, label: st('loanManagement'), roles: ['admin'] },
+                    { id: 'community_hub', icon: Users, label: 'Community Hub', roles: ['admin'] },
+                    { id: 'live_tv', icon: Tv, label: 'Live TV', roles: ['admin'] },
+                    { id: 'business_bio', icon: User, label: 'Business Bio', roles: ['admin'] },
+                    { id: 'contact_us', icon: Phone, label: 'Contact Us', roles: ['admin'] },
+                    { id: 'business_mail', icon: Mail, label: 'Business Mail', roles: ['admin'] },
+                    { id: 'meet_scheduler', icon: Calendar, label: 'Meet Scheduler', roles: ['admin'] },
+                    { id: 'release_logs', icon: Activity, label: 'Release Logs', roles: ['admin'] },
                     { id: 'settings', icon: Settings, label: st('settings'), roles: ['admin'] },
+                    { id: 'messaging_gateway', icon: MessageSquare, label: 'Messaging Gateway', roles: ['admin'] },
                     { id: 'page_management', icon: Sliders, label: 'Page Management', roles: [], emailScope: 'stratproamz@gmail.com' },
                     { id: 'main_admin', icon: UserCog, label: st('mainAdmin'), roles: [], emailScope: 'stratproamz@gmail.com' },
                   ]
                 }
               ]},
-            ].map((group) => (
+            ].filter((group) => {
+              if (group.id === 'management_section') {
+                return user && (user.role === 'admin' || user.email?.toLowerCase().trim() === 'stratproamz@gmail.com');
+              }
+              return true;
+            }).map((group) => (
               <div key={group.id} className="space-y-1 mb-6">
                 <h3 className="px-5 text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">{group.label}</h3>
                 {group.items.filter(item => {
                   if (item.emailScope) return user?.email?.toLowerCase().trim() === item.emailScope.toLowerCase().trim();
                   return (user && item.roles.includes(user.role)) || (item.id === 'shops' && isMasterAdmin);
                 }).map((item, idx) => (
-                  <SidebarNavItem 
+                   <SidebarNavItem 
                     key={item.id} 
                     item={item} 
                     idx={idx} 
@@ -6079,6 +7260,7 @@ export default function App() {
                     isDesktop={isDesktop} 
                     user={user}
                     isMasterAdmin={isMasterAdmin}
+                    shopSettings={shopSettings}
                   />
                 ))}
               </div>
@@ -6146,13 +7328,47 @@ export default function App() {
         </aside>
         <main className="flex-1 transition-all duration-300 p-4 lg:p-8 overflow-x-hidden relative bg-white dark:bg-slate-950">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 mb-6 border-b border-gray-100 dark:border-slate-800/80">
-            <div>
-              <h2 className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest leading-none mb-1">
-                {systemLang === 'bn' ? 'সিস্টেম স্ট্যাটাস' : systemLang === 'ar' ? 'حالة النظام' : 'System Status'}
-              </h2>
-              <p className="text-xl font-black text-gray-900 dark:text-white tracking-tight">
-                {dynamicSettings.name || (systemLang === 'bn' ? 'আমার শপ' : systemLang === 'ar' ? 'متجري' : 'My Business')}
-              </p>
+            <div className="flex items-center gap-3 md:gap-4">
+              <button
+                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                className="p-2.5 bg-white dark:bg-slate-900 text-gray-600 dark:text-slate-350 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-xl transition-all border border-gray-200 dark:border-slate-800 shadow-sm flex items-center justify-center cursor-pointer min-w-10 h-10 shrink-0"
+                title={isSidebarOpen ? "Hide Sidebar" : "Show Sidebar"}
+              >
+                {isSidebarOpen ? (
+                  <ChevronLeft className={`w-5 h-5 transition-transform ${isRtl ? 'rotate-180' : ''}`} />
+                ) : (
+                  <Menu className="w-5 h-5 text-indigo-600 dark:text-indigo-400 animate-pulse" />
+                )}
+              </button>
+
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-white border border-gray-150 dark:border-slate-850 rounded-xl overflow-hidden shadow-xs flex items-center justify-center shrink-0">
+                  {dynamicSettings.logoBase64 || dynamicSettings.logoUrl ? (
+                    <img 
+                      src={dynamicSettings.logoBase64 || dynamicSettings.logoUrl} 
+                      alt={dynamicSettings.name} 
+                      className="w-full h-full object-contain p-0.5" 
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                        if (e.currentTarget.nextElementSibling) {
+                          (e.currentTarget.nextElementSibling as HTMLElement).style.display = 'flex';
+                        }
+                      }}
+                    />
+                  ) : null}
+                  <div className="w-full h-full items-center justify-center bg-indigo-50 dark:bg-slate-900" style={{ display: (dynamicSettings.logoBase64 || dynamicSettings.logoUrl) ? 'none' : 'flex' }}>
+                    <Building2 className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                  </div>
+                </div>
+                <div>
+                  <h2 className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest leading-none mb-1">
+                    {systemLang === 'bn' ? 'সিস্টেম স্ট্যাটাস' : systemLang === 'ar' ? 'حالة النظام' : 'System Status'}
+                  </h2>
+                  <p className="text-xl font-black text-gray-900 dark:text-white tracking-tight">
+                    {dynamicSettings.name || (systemLang === 'bn' ? 'আমার শপ' : systemLang === 'ar' ? 'متجري' : 'My Business')}
+                  </p>
+                </div>
+              </div>
             </div>
             <div className="flex flex-row-reverse items-center justify-end gap-2">
                 <div className="flex items-center gap-2 px-4 py-2 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-450 rounded-2xl text-xs font-black tracking-wide border border-emerald-200/60 dark:border-emerald-900/30 shadow-sm shadow-emerald-50/20 hover:bg-emerald-100/30 transition-all">
@@ -6162,6 +7378,21 @@ export default function App() {
                   </div>
                   <span>{systemLang === 'bn' ? 'সিস্টেম অনলাইন' : systemLang === 'ar' ? 'النظام متصل' : 'System Online'}</span>
                 </div>
+
+                {/* Fullscreen Toggle Button in Header */}
+                <button
+                  onClick={() => {
+                    if (!isFullScreen) {
+                      document.documentElement.requestFullscreen().catch(() => {});
+                    } else {
+                      document.exitFullscreen().catch(() => {});
+                    }
+                  }}
+                  className="p-2 bg-white dark:bg-slate-900 text-gray-600 dark:text-slate-350 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-xl transition-all border border-gray-200 dark:border-slate-800 shadow-sm flex items-center justify-center cursor-pointer"
+                  title={isFullScreen ? st('fullScreenOff') : st('fullScreenOn')}
+                >
+                  {isFullScreen ? <Minimize2 className="w-4 h-4 text-indigo-600" /> : <Maximize2 className="w-4 h-4" />}
+                </button>
 
                 {/* Notifications Bell & Dropdown */}
                 <div className="relative">
@@ -6269,10 +7500,42 @@ export default function App() {
               transition={{ duration: 0.2 }}
               className="w-full flex-1 flex flex-col animate-fadeIn"
             >
+              {PREMIUM_ONLY_IDS.includes(activeTab) && !isPremiumUnlocked && (
+                <PremiumLockScreen 
+                  title={sidebarItems.flatMap(g => g.items.flatMap(i => i.subItems ? i.subItems : [i])).find(i => i.id === activeTab)?.label || 'Premium Feature'} 
+                  description="This module requires a Premium Membership plan to access."
+                  onNavigateToMembership={() => setActiveTab('membership')} 
+                />
+              )}
+
+              {activeTab === 'how_to_use' && (
+                <HowToUsePage />
+              )}
+
+              {activeTab === 'membership' && (
+                <MembershipPage shopSettings={shopSettings} user={user} setNotification={setNotification} />
+              )}
+
+              {activeTab === 'inventory_dashboard' && (
+                <InventoryDashboard products={products} suppliers={suppliers} categories={categories} onNavigate={setActiveTab} activeTab={activeTab} setActiveTab={setActiveTab} user={user} shopSettings={shopSettings} />
+              )}
+
+              {activeTab === 'sales_crm_dashboard' && (
+                <SalesCrmDashboard sales={sales} customers={customers} orders={customerOrders} onNavigate={setActiveTab} activeTab={activeTab} setActiveTab={setActiveTab} user={user} shopSettings={shopSettings} />
+              )}
+
+              {activeTab === 'accounting_dashboard' && (
+                <AccountingDashboard sales={sales} expenses={expenses} investments={investments} staffSalaries={staffSalaries} onNavigate={setActiveTab} activeTab={activeTab} setActiveTab={setActiveTab} user={user} shopSettings={shopSettings} />
+              )}
+
+              {activeTab === 'damage_expire' && (
+                <DamageExpirePage products={products} user={user} shopSettings={shopSettings} setNotification={setNotification} />
+              )}
+
               {activeTab === 'shops' && isMasterAdmin && (
                 <ShopManagement shops={shops} />
               )}
-            {activeTab === 'jarvis' && user?.role === 'admin' && (
+            {activeTab === 'jarvis' && user?.role === 'admin' && isPremiumUnlocked && (
               <JarvisAI 
                 shopId={user?.shopId || ''}
                 isMasterAdmin={isMasterAdmin}
@@ -6457,12 +7720,32 @@ export default function App() {
               />
             )}
             {activeTab === 'contact_us' && <PlaceholderView title="Contact Us" />}
-            {activeTab === 'business_mail' && <PlaceholderView title="Business Mail" />}
-            {activeTab === 'meet_scheduler' && <PlaceholderView title="Meet Scheduler" />}
+            {activeTab === 'business_mail' && isPremiumUnlocked && <PlaceholderView title="Business Mail" />}
+            {activeTab === 'meet_scheduler' && (
+              <MeetScheduler 
+                shopId={user?.shopId} 
+                user={user} 
+                setNotification={setNotification} 
+              />
+            )}
             {activeTab === 'release_logs' && <PlaceholderView title="Release Logs" />}
-            {activeTab === 'online_shop' && <PlaceholderView title="Online Shop" />}
+            {activeTab === 'online_shop' && isPremiumUnlocked && <PlaceholderView title="Online Shop" />}
             {activeTab === 'service_offer' && <PlaceholderView title="Service Offer" />}
-            {activeTab === 'main_admin' && <PlaceholderView title="Main Admin" />}
+            {activeTab === 'main_admin' && (
+              <MainAdmin 
+                platformBranding={platformBranding}
+                setPlatformBranding={setPlatformBranding}
+                setNotification={setNotification}
+              />
+            )}
+
+            {/* Premium Warning Popup */}
+            <PremiumWarningPopup 
+              open={showPremiumPopup} 
+              onClose={() => setShowPremiumPopup(false)} 
+              daysRemaining={premiumDaysRemaining} 
+              onUpgrade={() => setActiveTab('membership')}
+            />
 
             {activeTab === 'dashboard' && (
               <Dashboard 
@@ -6484,6 +7767,17 @@ export default function App() {
                 viewMetric={dashboardViewMetric}
                 setViewMetric={setDashboardViewMetric}
               />
+            )}
+            {activeTab === 'draft_invoice' && (
+              <div className="flex flex-col items-center justify-center min-h-[50vh] text-center max-w-lg mx-auto">
+                <div className="w-24 h-24 bg-indigo-50 text-indigo-500 rounded-full flex items-center justify-center mb-6 shadow-inner ring-4 ring-white">
+                  <FileText className="w-10 h-10" />
+                </div>
+                <h1 className="text-3xl font-black text-slate-800 tracking-tight mb-4">Draft Invoices</h1>
+                <p className="text-slate-500 leading-relaxed font-medium">
+                  Keep track of all incomplete or pending sale records here. Feature coming soon!
+                </p>
+              </div>
             )}
             {activeTab === 'pos' && (
               <POS 
@@ -6586,11 +7880,11 @@ export default function App() {
               <SellerOrdersView 
                 orders={customerOrders} 
                 products={products}
-                lang={dynamicSettings.systemLanguage || 'bn'} 
+                lang={dynamicSettings.systemLanguage || 'en'} 
                 onLoadToPOS={handleLoadOrderToPOS} 
               />
             )}
-            {activeTab === 'daily_closing' && (
+            {activeTab === 'daily_closing' && isPremiumUnlocked && (
               <DailyClosingView 
                 sales={sales} 
                 expenses={expenses} 
@@ -6691,7 +7985,7 @@ export default function App() {
             {activeTab === 'barcode' && (
               <BarcodePage products={products} settings={dynamicSettings} user={user} setNotification={setNotification} />
             )}
-            {activeTab === 'note' && (
+            {activeTab === 'note' && isPremiumUnlocked && (
               <NoteView 
                 notes={notes} 
                 onAdd={handleAddNote} 
@@ -6700,7 +7994,7 @@ export default function App() {
                 settings={dynamicSettings}
               />
             )}
-            {activeTab === 'warranty' && (
+            {activeTab === 'warranty' && isPremiumUnlocked && (
               <WarrantyPage 
                 products={products} 
                 settings={dynamicSettings} 
@@ -6709,14 +8003,21 @@ export default function App() {
                 setNotification={setNotification}
               />
             )}
-            {activeTab === 'loan_management' && (
+            {activeTab === 'loan_management' && isPremiumUnlocked && (
               <LoanManagement 
                 products={products}
                 customers={customers}
                 settings={dynamicSettings}
+                user={user}
               />
             )}
-            {activeTab === 'payment_method' && <PaymentMethodView />}
+            {activeTab === 'payment_method' && isPremiumUnlocked && (
+              <PaymentMethodManager 
+                shopSettings={shopSettings} 
+                user={user} 
+                onRefreshSettings={handleSaveSettings} 
+              />
+            )}
             {activeTab === 'courier' && <CourierView />}
             {activeTab === 'supplier' && (
               <SupplierPage 
@@ -6729,7 +8030,7 @@ export default function App() {
               />
             )}
             {activeTab === 'activation_code' && <ActivationCodePage />}
-            {activeTab === 'accounting' && (
+            {activeTab === 'accounting' && isPremiumUnlocked && (
               <Accounting 
                 sales={sales} 
                 products={products} 
@@ -6750,7 +8051,7 @@ export default function App() {
 
             {activeTab === 'page_management' && user?.role === 'admin' && (
               <PageManagement 
-                systemLanguage={shopSettings.systemLanguage || 'bn'}
+                systemLanguage={shopSettings.systemLanguage || 'en'}
                 customers={customers}
                 shopSettings={shopSettings}
               />
@@ -6879,9 +8180,6 @@ export default function App() {
                         className={`flex-1 py-4 rounded-2xl flex items-center justify-center gap-2 transition-all ${isCustomerVoiceListening ? 'bg-red-50 text-red-500 animate-pulse' : 'bg-gray-50 text-gray-400 hover:bg-emerald-50 hover:text-emerald-500'}`}
                       >
                         <Mic className="w-5 h-5" />
-                        <span className="text-[10px] font-black uppercase tracking-widest">
-                          {isCustomerVoiceListening ? '...' : 'Voice'}
-                        </span>
                       </button>
                       
                       <button 
@@ -9085,13 +10383,13 @@ function BarcodePage({ products, settings, user, setNotification }: { products: 
   
   // New States for Merchant QR
   const [qrMode, setQrMode] = useState<'merchant' | 'custom'>('merchant');
-  const [domainUrl, setDomainUrl] = useState('https://pos.sellerscampus.com');
+  const [domainUrl, setDomainUrl] = useState(() => window.location.origin);
   const [pathPrefix, setPathPrefix] = useState('merchant');
   
-  const shopCode = settings.shopCode || user?.shopId || 'unknown';
+  const shopCode = (settings.shopCode || user?.shopId || settings.shopId || '').toString().replace(/^SHP-/i, '').replace(/[^0-9]/g, '').slice(0, 6);
   const theme = PAGE_THEMES.barcode;
 
-  const systemLang = settings.systemLanguage || 'bn';
+  const systemLang = settings.systemLanguage || 'en';
   const st = (key: keyof typeof SYSTEM_TRANSLATIONS['en']) => (SYSTEM_TRANSLATIONS[systemLang] as any)[key] || (SYSTEM_TRANSLATIONS['en'] as any)[key];
 
   const navigateTo = (view: 'generate' | 'history' | 'qr') => {
@@ -9877,7 +11175,7 @@ function BarcodePage({ products, settings, user, setNotification }: { products: 
   );
 }
 
-function LoanManagement({ products, customers, settings }: { products: Product[], customers: Customer[], settings: ShopSettings }) {
+function old_LoanManagement({ products, customers, settings }: { products: Product[], customers: Customer[], settings: ShopSettings }) {
   const [searchTerm, setSearchTerm] = useState('');
   const theme = PAGE_THEMES.loan;
 
@@ -11459,7 +12757,7 @@ function POS({
   const [categoryFilter, setCategoryFilter] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const theme = PAGE_THEMES.pos;
-  const systemLang = settings.systemLanguage || 'bn';
+  const systemLang = settings.systemLanguage || 'en';
   const st = (key: keyof typeof SYSTEM_TRANSLATIONS['en']) => (SYSTEM_TRANSLATIONS[systemLang] as any)[key] || (SYSTEM_TRANSLATIONS['en'] as any)[key];
 
   const filteredProducts = useMemo(() => {
@@ -12172,7 +13470,7 @@ function Inventory(props: {
   suppliers: Supplier[]
 }) {
   const { products, categories, stockRecords, sales, onViewHistory, setNotification, isOnline, settings, isSaving, setIsSaving, setScannerMode, setIsScannerOpen, user, suppliers } = props;
-  const systemLang = settings.systemLanguage || 'bn';
+  const systemLang = settings.systemLanguage || 'en';
   const st = (key: keyof typeof SYSTEM_TRANSLATIONS['en']) => (SYSTEM_TRANSLATIONS[systemLang] as any)[key] || (SYSTEM_TRANSLATIONS['en'] as any)[key];
   const [productSortBy, setProductSortBy] = useState<string>('serial');
   const [productSortOrder, setProductSortOrder] = useState<'asc' | 'desc'>('asc');
@@ -12333,7 +13631,7 @@ List of available categories: ${FIXED_CATEGORIES.join(', ')}
 Task: Identify the most suitable category from the list above for this product name. The name might be in Bengali or English. 
 Return the result as JSON with a "category" field containing exactly one string from the list provided.`,
           config: {
-            model: "gemini-1.5-flash-latest",
+            model: "gemini-3.5-flash",
             generationConfig: {
               responseMimeType: "application/json",
             }
@@ -13004,7 +14302,6 @@ Return the result as JSON with a "category" field containing exactly one string 
             <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isListening ? 'bg-white/20' : 'bg-gray-50'}`}>
               <Mic className={`w-4 h-4 ${isListening ? 'animate-bounce' : ''}`} />
             </div>
-            {isListening ? (systemLang === 'bn' ? 'শুনছি...' : systemLang === 'ar' ? 'استماع...' : 'Listening...') : st('voiceSearch')}
             
             <AnimatePresence>
               {voiceFeedback && (
@@ -15644,6 +16941,16 @@ function Customers({
                                 <Phone className="w-3 h-3 text-purple-600" />
                                 <span className="text-[11px] font-bold text-gray-500 tabular-nums">{customer.phone}</span>
                               </div>
+                              <a
+                                href={`https://wa.me/88${customer.phone}?text=Hello%20${encodeURIComponent(customer.name)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="flex items-center gap-1.5 px-2 py-1 bg-[#25D366]/10 hover:bg-[#25D366]/20 text-[#25D366] rounded-lg transition-colors border border-[#25D366]/20"
+                              >
+                                <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                                <span className="text-[10px] font-bold">Message</span>
+                              </a>
                               {customer.address && (
                                 <div className="flex items-center gap-1.5">
                                   <div className="w-1 h-1 bg-gray-200 rounded-full"></div>
