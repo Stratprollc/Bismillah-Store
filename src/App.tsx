@@ -5495,6 +5495,8 @@ export default function App() {
                     console.log("Using cached user data due to offline/error.");
                     setUser(cachedData);
                     setIsOnboarded(cachedData.isOnboarded);
+                    setAuthChecked(true);
+                    setLoading(false);
                     return;
                  }
                } catch(ex) {
@@ -5517,6 +5519,22 @@ export default function App() {
         }
       } else {
         // Logged out or Anonymous
+        const cachedUserStr = localStorage.getItem('shopmaster_user');
+        if (cachedUserStr) {
+          try {
+            const cachedData = JSON.parse(cachedUserStr);
+            if (cachedData && cachedData.uid) {
+              console.log("Using cached user data since Firebase Auth returned null (likely iframe cross-origin storage restriction).");
+              setUser(cachedData);
+              setIsOnboarded(cachedData.isOnboarded !== undefined ? cachedData.isOnboarded : true);
+              setAuthChecked(true);
+              setLoading(false);
+              return;
+            }
+          } catch (e) {
+            console.warn("Failed to parse cached user", e);
+          }
+        }
         setUser(null);
         setIsOnboarded(null);
       }
